@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { collection, getDocs, doc, getDoc, deleteDoc } from "firebase/firestore";
 import { db } from "./firebase";
-import { Play, Loader2, BookOpen, ArrowLeft, RefreshCw, Home, Layers } from "lucide-react";
+import { Play, Loader2, BookOpen, ArrowLeft, RefreshCw, Home, Layers, Volume2 } from "lucide-react";
 import "./App.css";
 
 declare var YT: any;
@@ -81,6 +81,7 @@ export default function App() {
   const [sentenceWords, setSentenceWords] = useState<Word[]>([]);
   const [sentenceWordIndex, setSentenceWordIndex] = useState<number>(0);
   const [flippedCardIndex, setFlippedCardIndex] = useState<number>(-1);
+  const [audioPlayingIndex, setAudioPlayingIndex] = useState<number>(-1);
 
   // Load videos from Firebase
   useEffect(() => {
@@ -742,10 +743,11 @@ export default function App() {
         </>
       )}
 
-      {/* 3. FLASHCARD OVERLAY — Studio ReviewModal gibi flip kart */}
+      {/* 3. FLASHCARD OVERLAY — Studio ReviewModal gibi flip kart + ses */}
       {showFlashcards && sentenceWords.length > 0 && (() => {
         const w = sentenceWords[sentenceWordIndex];
         const isFlipped = flippedCardIndex === sentenceWordIndex;
+        const isPlaying = audioPlayingIndex === sentenceWordIndex;
         return (
           <>
             <div className="popup-overlay" />
@@ -766,6 +768,28 @@ export default function App() {
                         <p className="flip-card-prompt">{w.story?.substring(0, 80) || 'Kartı çevir'}</p>
                       </div>
                     )}
+                    {/* Ses butonu — Studio ReviewModal gibi sağ üst köşede */}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (isPlaying) { window.speechSynthesis.cancel(); setAudioPlayingIndex(-1); return; }
+                        setAudioPlayingIndex(sentenceWordIndex);
+                        const target = w.word.replace(/\s*\(.*?\)\s*/g, '').trim();
+                        const utterance = new SpeechSynthesisUtterance(target);
+                        utterance.rate = 0.85;
+                        utterance.lang = 'ar';
+                        utterance.onend = () => setAudioPlayingIndex(-1);
+                        utterance.onerror = () => setAudioPlayingIndex(-1);
+                        window.speechSynthesis.speak(utterance);
+                      }}
+                      className={`absolute top-3 right-3 w-10 h-10 rounded-full flex items-center justify-center shadow-lg transition-all duration-200 active:scale-90 z-10 ${isPlaying
+                        ? 'bg-blue-500 text-white'
+                        : 'bg-white/80 backdrop-blur-sm text-gray-700 hover:bg-white'
+                      }`}
+                      title="Telaffuzu dinle"
+                    >
+                      <Volume2 size={18} className={isPlaying ? 'animate-pulse' : ''} />
+                    </button>
                     <div className="flip-card-tap">DOKUN ÇEVİR</div>
                   </div>
                   <div className="flip-card-meaning-area">
