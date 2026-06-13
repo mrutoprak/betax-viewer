@@ -96,6 +96,7 @@ export default function App() {
   const [sentenceWordIndex, setSentenceWordIndex] = useState<number>(0);
   const [flippedCardIndex, setFlippedCardIndex] = useState<number>(-1);
   const [audioPlayingIndex, setAudioPlayingIndex] = useState<number>(-1);
+  const [wordPopupPlaying, setWordPopupPlaying] = useState<boolean>(false);
 
   // Load videos from Firebase
   useEffect(() => {
@@ -312,6 +313,7 @@ export default function App() {
 
   const handleSelectWord = (word: Word) => {
     setWordPopup(word);
+    setWordPopupPlaying(false);
   };
 
   // Back to splash
@@ -634,17 +636,39 @@ export default function App() {
                     </div>
                   )}
                 </div>
-              {wordPopup && (
+              {wordPopup && (() => {
+                const pw = wordPopup;
+                let pwTarget = (pw.sentenceForm && pw.sentenceForm.trim()) ? pw.sentenceForm.trim() : pw.word.replace(/\s*[\(\[].*?[\)\]]\s*/g, '').replace(/[,\/].*$/, '').trim();
+                const pwPlaying = wordPopupPlaying;
+                return (
                 <>
                   <div className="popup-overlay" onClick={() => setWordPopup(null)} />
                   <div className="word-popup">
                     <button className="popup-close" onClick={() => setWordPopup(null)}>✕</button>
                     <div className="popup-content">
-                      <h2 className="popup-word">
-                        {wordPopup.word.replace(/\s*\(.*?\)\s*/g, "")}
-                      </h2>
-                      {wordPopup.imageUrl && (
-                        <img src={wordPopup.imageUrl} alt={wordPopup.word} className="popup-image" />
+                      <div style={{display:'flex', alignItems:'center', gap:'8px', marginBottom:'12px'}}>
+                        <h2 className="popup-word" style={{marginBottom:0}}>
+                          {pw.word.replace(/\s*\(.*?\)\s*/g, "")}
+                        </h2>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (pwPlaying) { window.speechSynthesis.cancel(); setWordPopupPlaying(false); return; }
+                            setWordPopupPlaying(true);
+                            const u = new SpeechSynthesisUtterance(pwTarget);
+                            u.rate = 0.85; u.lang = detectSpeechLang(pwTarget);
+                            u.onend = () => setWordPopupPlaying(false);
+                            u.onerror = () => setWordPopupPlaying(false);
+                            window.speechSynthesis.speak(u);
+                          }}
+                          className={`w-9 h-9 rounded-full flex items-center justify-center transition-all active:scale-90 ${pwPlaying ? 'bg-blue-500 text-white' : 'bg-blue-50 text-blue-500 hover:bg-blue-100'}`}
+                          title="Telaffuzu dinle"
+                        >
+                          <Volume2 size={16} className={pwPlaying ? 'animate-pulse' : ''} />
+                        </button>
+                      </div>
+                      {pw.imageUrl && (
+                        <img src={pw.imageUrl} alt={pw.word} className="popup-image" />
                       )}
                       {wordPopup.turkishMeaning && (
                         <div className="popup-section">
@@ -676,7 +700,8 @@ export default function App() {
                     </div>
                   </div>
                 </>
-              )}
+              );
+              })()}
             </div>
           </div>
         </div>
@@ -788,7 +813,8 @@ export default function App() {
                         e.stopPropagation();
                         if (isPlaying) { window.speechSynthesis.cancel(); setAudioPlayingIndex(-1); return; }
                         setAudioPlayingIndex(sentenceWordIndex);
-                        const target = w.word.replace(/\s*\(.*?\)\s*/g, '').trim();
+                        // Cümledeki asıl formu kullan, parantez içi okunuşu at
+                        let target = (w.sentenceForm && w.sentenceForm.trim()) ? w.sentenceForm.trim() : w.word.replace(/\s*[\(\[].*?[\)\]]\s*/g, '').replace(/[,\/].*$/, '').trim();
                         const utterance = new SpeechSynthesisUtterance(target);
                         utterance.rate = 0.85;
                         utterance.lang = detectSpeechLang(target);
