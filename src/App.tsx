@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { collection, getDocs, doc, getDoc, deleteDoc } from "firebase/firestore";
 import { db } from "./firebase";
-import { Play, Loader2, BookOpen, ArrowLeft, RefreshCw, Home, Layers, Volume2 } from "lucide-react";
+import { Play, Loader2, BookOpen, ArrowLeft, RefreshCw, Clock, Volume2 } from "lucide-react";
 import "./App.css";
 
 declare var YT: any;
@@ -97,6 +97,11 @@ export default function App() {
   const [flippedCardIndex, setFlippedCardIndex] = useState<number>(-1);
   const [audioPlayingIndex, setAudioPlayingIndex] = useState<number>(-1);
   const [wordPopupPlaying, setWordPopupPlaying] = useState<boolean>(false);
+  const srsTimerRef = useRef<number>(0);
+
+  // --- Active SRS Panel ---
+  const [showActivePanel, setShowActivePanel] = useState<boolean>(false);
+  const [srsActiveWords, setSrsActiveWords] = useState<{word: Word; intervalIndex: number; dueAt: number; startedAt: number}[]>([]);
 
   // Load videos from Firebase
   useEffect(() => {
@@ -292,6 +297,43 @@ export default function App() {
     }
   }, [activeIndex]);
 
+  // SRS word tracker — video oynarken aktif segment kelimelerini ekler
+  useEffect(() => {
+    if (screen !== "player" || !playerRef.current) return;
+    const tick = () => {
+      if (!playerRef.current?.getCurrentTime) { srsTimerRef.current = requestAnimationFrame(tick); return; }
+      try {
+        const segIdx = transcriptSegments.findIndex((s, i) => {
+          const segStart = s.start;
+          if (segStart === undefined) return false;
+          const end = i < transcriptSegments.length - 1
+            ? (transcriptSegments[i + 1].start ?? segStart + 5)
+            : segStart + 5;
+          return playerRef.current.getCurrentTime() >= segStart && playerRef.current.getCurrentTime() < end;
+        });
+        if (segIdx !== -1) {
+          const segWords = getWordsForSentence(transcriptSegments[segIdx]?.text || '');
+          if (segWords.length > 0) {
+            setSrsActiveWords(prev => {
+              const existingIds = new Set(prev.map(x => x.word.id));
+              const newWords = segWords.filter(w => !existingIds.has(w.id)).map(w => ({
+                word: w,
+                intervalIndex: 0,
+                dueAt: Date.now() + 5000,
+                startedAt: Date.now()
+              }));
+              if (newWords.length === 0) return prev;
+              return [...prev, ...newWords];
+            });
+          }
+        }
+      } catch {}
+      srsTimerRef.current = requestAnimationFrame(tick);
+    };
+    tick();
+    return () => { if (srsTimerRef.current) cancelAnimationFrame(srsTimerRef.current); };
+  }, [screen, transcriptSegments, getWordsForSentence]);
+
   // Get words for a sentence
   const getWordsForSentence = useCallback(
     (sentenceText: string): Word[] => {
@@ -466,6 +508,9 @@ export default function App() {
             <button onClick={handleRefresh} className="topbar-refresh" title="Yenile">
               <RefreshCw size={18} />
             </button>
+            <button onClick={() => setShowActivePanel(v => !v)} className={`topbar-refresh ${showActivePanel ? 'active' : ''}`} title="Active Kartlar">
+              <Clock size={18} />
+            </button>
           </div>
 
           {/* Main content */}
@@ -481,8 +526,46 @@ export default function App() {
 
             {/* RIGHT: Side Panel */}
             <div className="player-sidebar">
-              {/* Transcript — tek sekme, sekme yok */}
-              <div className="subtitles-content" ref={transcriptRef}>
+              {/* Active Panel — SRS sırası */}
+              {showActivePanel && (
+                <div className="active-panel">
+                  <div className="active-panel-header">
+                    <Clock size={15} />
+                    <span>Active Kartlar ({srsActiveWords.length})</span>
+                  </div>
+                  <div className="active-panel-list">
+                    {srsActiveWords.length === 0 ? (
+                      <div className="empty-state small">
+                        <p>Henüz aktif kart yok. Video oynadıkça kelimeler burada görünecek.</p>
+                      </div>
+                    ) : (
+                      srsActiveWords.map((item, idx) => {
+                        const w = item.word;
+                        const remaining = Math.max(0, item.dueAt - Date.now());
+                        const remainingStr = remaining < 1000 ? 'şimdi' :
+                          remaining < 60000 ? `${Math.ceil(remaining / 1000)}sn` :
+                          remaining < 3600000 ? `${Math.ceil(remaining / 60000)}dk` :
+                          `${Math.ceil(remaining / 3600000)}s`;
+                        return (
+                          <button key={idx} className="active-card-item" onClick={() => {
+                            setWordPopup(w);
+                            setWordPopupPlaying(false);
+                            setFlippedCardIndex(-1);
+                          }}>
+                            <div className="active-card-info">
+                              <span className="active-card-word">{w.word.replace(/\s*\(.*?\)\s*/g, '')}</span>
+                              <span className="active-card-meaning">{w.turkishMeaning}</span>
+                            </div>
+                            <span className={`active-card-time ${remaining < 1000 ? 'due' : ''}`}>{remainingStr}</span>
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              )}
+              {/* Transcript */}
+              <div className="subtitles-content" ref={transcriptRef} style={showActivePanel ? {height:'50%'} : {}}>
                   {loadingWords ? (
                     <div className="loading-state">
                       <Loader2 size={24} className="spin" />

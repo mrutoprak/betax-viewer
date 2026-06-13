@@ -54,6 +54,7 @@
 .topbar-back:hover { background:rgba(0,122,255,.1); }
 .topbar-refresh { background:none; border:none; color:#007AFF; cursor:pointer; padding:6px; border-radius:50%; transition:all .15s; display:flex; }
 .topbar-refresh:hover { background:rgba(0,122,255,.1); }
+.topbar-refresh.active { color:#007AFF; background:rgba(0,122,255,.15); }
 .topbar-url { flex:1; background:#f2f2f7; border:1px solid #e5e5ea; border-radius:20px; padding:6px 14px; font-size:13px; color:#555; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-family:inherit; transition:border-color .15s; }
 
 .player-content { flex:1; display:flex; overflow:hidden; }
@@ -140,8 +141,21 @@
 .sentence-content h2 { font-size:22px; font-weight:600; color:#000; margin-bottom:8px; line-height:1.3; }
 .sentence-content .translation { font-size:15px; color:#636366; margin-bottom:28px; }
 
+/* === ACTIVE PANEL (SRS Listesi) === */
+.active-panel { background:#fff; border-bottom:1px solid #e5e5ea; overflow:hidden; display:flex; flex-direction:column; }
+.active-panel-header { display:flex; align-items:center; gap:6px; padding:10px 16px; font-size:13px; font-weight:600; color:#007AFF; border-bottom:1px solid #f2f2f7; flex-shrink:0; }
+.active-panel-list { overflow-y:auto; max-height:200px; padding:4px 8px; display:flex; flex-direction:column; gap:2px; }
+.active-card-item { display:flex; align-items:center; gap:8px; padding:8px 12px; border-radius:8px; background:none; border:none; cursor:pointer; transition:all .1s; text-align:left; width:100%; font-family:inherit; }
+.active-card-item:hover { background:#f2f2f7; }
+.active-card-item:active { background:#e5e5ea; }
+.active-card-info { flex:1; min-width:0; display:flex; flex-direction:column; gap:1px; }
+.active-card-word { font-size:13px; font-weight:500; color:#000; }
+.active-card-meaning { font-size:11px; color:#8e8e93; }
+.active-card-time { font-size:11px; font-weight:500; color:#8e8e93; padding:2px 8px; border-radius:6px; background:#f2f2f7; flex-shrink:0; }
+.active-card-time.due { color:#ff3b30; background:rgba(255,59,48,.1); }
+
 /* === SCROLLBAR (Light) === */
-.subtitles-content::-webkit-scrollbar, .video-list::-webkit-scrollbar { width:6px; }
+.subtitles-content::-webkit-scrollbar, .video-list::-webkit-scrollbar, .active-panel-list::-webkit-scrollbar { width:6px; }
 .subtitles-content::-webkit-scrollbar-track, .video-list::-webkit-scrollbar-track { background:transparent; }
 .subtitles-content::-webkit-scrollbar-thumb, .video-list::-webkit-scrollbar-thumb { background:rgba(0,0,0,.1); border-radius:3px; }
 
