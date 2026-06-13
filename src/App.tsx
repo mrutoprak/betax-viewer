@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { collection, getDocs, doc, getDoc } from "firebase/firestore";
 import { db } from "./firebase";
-import { YoutubeTranscript } from 'youtube-transcript';
 import { Play, ChevronLeft, Loader2, Languages, BookOpen, ArrowLeft, Bookmark } from "lucide-react";
 import "./App.css";
 
@@ -48,14 +47,17 @@ function extractVideoId(url: string): string | null {
   return null;
 }
 
-// YouTube'dan gerçek transcript + start sürelerini çek (Studio'daki gibi)
+// YouTube'dan gerçek transcript + start sürelerini çek
 async function fetchYouTubeTranscript(videoId: string): Promise<TranscriptSegment[]> {
-  const data = await YoutubeTranscript.fetchTranscript(videoId);
+  // youtubetranscript.com API'sini kullan (CORS dostu, Vercel'de calisir)
+  const res = await fetch(`https://youtubetranscript.com/?v=${videoId}`);
+  if (!res.ok) throw new Error(`Transcript API: ${res.status}`);
+  const data = await res.json();
   const raw = data.map((item: any) => ({
     text: item.text || '',
-    start: Math.floor((item.offset || 0) / 1000),
+    start: Math.floor(item.offset || 0),
     translation: '',
-  })).filter((item) => item.text.trim() !== '');
+  })).filter((item: any) => item.text.trim() !== '');
   return mergeTranscriptSegments(raw);
 }
 
