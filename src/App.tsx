@@ -6,6 +6,20 @@ import "./App.css";
 
 declare var YT: any;
 
+// Auto-detect language for speech synthesis based on text content
+function detectSpeechLang(text: string): string {
+  if (/[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]/.test(text)) return 'ar';     // Arabic
+  if (/[\uAC00-\uD7AF]/.test(text)) return 'ko';                                      // Korean
+  if (/[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]/.test(text)) return 'ja';       // Japanese
+  if (/[\u0400-\u04FF]/.test(text)) return 'ru';                                      // Russian
+  if (/[\u4E00-\u9FFF]/.test(text)) return 'zh';                                      // Chinese
+  if (/[\u0E00-\u0E7F]/.test(text)) return 'th';                                      // Thai
+  if (/[\u0600-\u06FF]/.test(text) && /[\u0590-\u05FF]/.test(text)) return 'he';    // Hebrew
+  if (/[\u1E00-\u1EFF]/.test(text)) return 'vi';                                      // Vietnamese
+  if (/^[\w\s]+$/.test(text)) return 'en';                                             // English (Latin only)
+  return 'en'; // fallback
+}
+
 interface Word {
   id: string;
   word: string;
@@ -777,7 +791,7 @@ export default function App() {
                         const target = w.word.replace(/\s*\(.*?\)\s*/g, '').trim();
                         const utterance = new SpeechSynthesisUtterance(target);
                         utterance.rate = 0.85;
-                        utterance.lang = 'ar';
+                        utterance.lang = detectSpeechLang(target);
                         utterance.onend = () => setAudioPlayingIndex(-1);
                         utterance.onerror = () => setAudioPlayingIndex(-1);
                         window.speechSynthesis.speak(utterance);
