@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { collection, getDocs, doc, getDoc } from "firebase/firestore";
+import { collection, getDocs, doc, getDoc, deleteDoc } from "firebase/firestore";
 import { db } from "./firebase";
 import { Play, ChevronLeft, Loader2, Languages, BookOpen, ArrowLeft, Bookmark } from "lucide-react";
 import "./App.css";
@@ -149,6 +149,19 @@ export default function App() {
       }
     };
     load();
+  }, []);
+
+  // Handle video deletion from Firebase
+  const handleDeleteVideo = useCallback(async (videoId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!window.confirm('Bu videoyu silmek istediğine emin misin?')) return;
+    try {
+      await deleteDoc(doc(db, 'videos', videoId));
+      setVideos(prev => prev.filter(v => v.id !== videoId));
+    } catch (err) {
+      console.error('Failed to delete video:', err);
+      window.alert('Video silinemedi.');
+    }
   }, []);
 
   // Handle video selection
@@ -400,20 +413,28 @@ export default function App() {
               </div>
             ) : (
               videos.map((v) => (
-                <button
-                  key={v.id}
-                  className="video-card"
-                  onClick={() => handleSelectVideo(v)}
-                >
-                  <div className="video-card-thumb">
-                    <Play size={18} />
-                  </div>
-                  <div className="video-card-info">
-                    <span className="video-card-title">
-                      {v.name || v.title || v.id}
-                    </span>
-                  </div>
-                </button>
+                <div key={v.id} className="video-card-wrapper">
+                  <button
+                    className="video-card"
+                    onClick={() => handleSelectVideo(v)}
+                  >
+                    <div className="video-card-thumb">
+                      <Play size={18} />
+                    </div>
+                    <div className="video-card-info">
+                      <span className="video-card-title">
+                        {v.name || v.title || v.id}
+                      </span>
+                    </div>
+                  </button>
+                  <button
+                    className="video-delete-btn"
+                    onClick={(e) => handleDeleteVideo(v.id, e)}
+                    title="Sil"
+                  >
+                    ✕
+                  </button>
+                </div>
               ))
             )}
           </div>
