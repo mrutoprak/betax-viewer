@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { collection, getDocs, doc, getDoc } from "firebase/firestore";
 import { db } from "./firebase";
 import { YoutubeTranscript } from 'youtube-transcript';
-import { Play, ChevronLeft, Loader2, Languages, BookOpen, ArrowLeft } from "lucide-react";
+import { Play, ChevronLeft, Loader2, Languages, BookOpen, ArrowLeft, Bookmark } from "lucide-react";
 import "./App.css";
 
 declare var YT: any;
@@ -65,7 +65,7 @@ function formatTime(seconds?: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-type SideTab = "subtitles" | "words";
+type SideTab = "subtitles" | "words" | "saved";
 
 export default function App() {
   const [videos, setVideos] = useState<Video[]>([]);
@@ -364,8 +364,8 @@ export default function App() {
             <button onClick={handleBackToSplash} className="topbar-back">
               <ArrowLeft size={20} />
             </button>
-            <div className="topbar-title">
-              <span>{selectedVideo.name || selectedVideo.title || ""}</span>
+            <div className="topbar-url">
+              {selectedVideo.videoUrl || selectedVideo.name || ""}
             </div>
           </div>
 
@@ -388,18 +388,26 @@ export default function App() {
                   className={`sidebar-tab ${sideTab === "subtitles" ? "active" : ""}`}
                   onClick={() => setSideTab("subtitles")}
                 >
-                  <Languages size={14} />
+                  <Languages size={16} />
                   Altyazılar
                 </button>
                 <button
                   className={`sidebar-tab ${sideTab === "words" ? "active" : ""}`}
                   onClick={() => setSideTab("words")}
                 >
-                  <BookOpen size={14} />
+                  <BookOpen size={16} />
                   Sözcükler
                   {uniqueWords.length > 0 && (
-                    <span className="tab-count">{uniqueWords.length}</span>
+                    <span className="tab-count purple">{uniqueWords.length}</span>
                   )}
+                </button>
+                <button
+                  className={`sidebar-tab ${sideTab === "saved" ? "active" : ""}`}
+                  onClick={() => setSideTab("saved")}
+                >
+                  <Bookmark size={16} />
+                  Kaydedildi
+                  <span className="tab-count green">12</span>
                 </button>
               </div>
 
@@ -651,6 +659,16 @@ export default function App() {
                       ))}
                     </div>
                   )}
+                </div>
+              )}
+
+              {/* SAVED TAB */}
+              {sideTab === "saved" && (
+                <div className="words-content">
+                  <div className="empty-state small">
+                    <p>Kaydedilen kelimeler</p>
+                    <p className="empty-hint">Studio'dan kaydettiğiniz kelimeler burada görünecek</p>
+                  </div>
                 </div>
               )}
             </div>
