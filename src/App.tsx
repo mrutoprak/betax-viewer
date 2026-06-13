@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { collection, getDocs, doc, getDoc } from "firebase/firestore";
 import { db } from "./firebase";
+import { YoutubeTranscript } from 'youtube-transcript';
 import { Play, ChevronLeft, Loader2, Languages, BookOpen, ArrowLeft } from "lucide-react";
 import "./App.css";
 
@@ -45,6 +46,16 @@ function extractVideoId(url: string): string | null {
     if (m?.[1]) return m[1];
   }
   return null;
+}
+
+// YouTube'dan gerçek transcript + start sürelerini çek (Studio'daki gibi)
+async function fetchYouTubeTranscript(videoId: string): Promise<TranscriptSegment[]> {
+  const data = await YoutubeTranscript.fetchTranscript(videoId);
+  return data.map((item: any) => ({
+    text: item.text || '',
+    start: Math.floor((item.offset || 0) / 1000),
+    translation: '',
+  })).filter((item) => item.text.trim() !== '');
 }
 
 function formatTime(seconds?: number): string {
@@ -111,25 +122,30 @@ export default function App() {
         .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
       setWords(allWords);
 
-      // Load transcript from Firebase
+      // Transcript'i doğrudan YouTube'dan çek (gerçek start süreleri için)
       try {
-        let loaded = false;
         if (youtubeId) {
-          const ts = await getDoc(doc(db, "transcripts", youtubeId));
-          if (ts.exists() && ts.data().segments?.length > 0) {
-            const rawSegs = ts.data().segments as TranscriptSegment[];
-            setTranscriptSegments(ensureStartValues(rawSegs));
-            loaded = true;
+          const ytSegments = await fetchYouTubeTranscript(youtubeId);
+          if (ytSegments.length > 0) {
+            setTranscriptSegments(ytSegments);
           }
         }
-        if (!loaded) {
-          const old = await getDoc(doc(db, "videos", video.id, "transcript", "data"));
-          if (old.exists() && old.data().segments?.length > 0) {
-            const rawSegs = old.data().segments as TranscriptSegment[];
-            setTranscriptSegments(ensureStartValues(rawSegs));
+      } catch {
+        // YouTube olmazsa Firebase'den yedekle
+        try {
+          if (youtubeId) {
+            const ts = await getDoc(doc(db, "transcripts", youtubeId));
+            if (ts.exists() && ts.data().segments?.length > 0) {
+              setTranscriptSegments(ensureStartValues(ts.data().segments as TranscriptSegment[]));
+            } else {
+              const old = await getDoc(doc(db, "videos", video.id, "transcript", "data"));
+              if (old.exists() && old.data().segments?.length > 0) {
+                setTranscriptSegments(ensureStartValues(old.data().segments as TranscriptSegment[]));
+              }
+            }
           }
-        }
-      } catch {}
+        } catch {}
+      }
 
       setScreen("player");
     } catch (e) {
