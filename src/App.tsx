@@ -51,11 +51,61 @@ function extractVideoId(url: string): string | null {
 // YouTube'dan gerçek transcript + start sürelerini çek (Studio'daki gibi)
 async function fetchYouTubeTranscript(videoId: string): Promise<TranscriptSegment[]> {
   const data = await YoutubeTranscript.fetchTranscript(videoId);
-  return data.map((item: any) => ({
+  const raw = data.map((item: any) => ({
     text: item.text || '',
     start: Math.floor((item.offset || 0) / 1000),
     translation: '',
   })).filter((item) => item.text.trim() !== '');
+  return mergeTranscriptSegments(raw);
+}
+
+// Studio'daki mergeTranscriptSegments'in aynısı — segmentleri cümle bazında birleştirir
+function cleanSubtitleText(text: string): string {
+  return text
+    .replace(/\[[^\]]+\]/g, '')
+    .replace(/\([^)]+\)/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function mergeTranscriptSegments(segments: { text: string; start: number; translation: string }[]): TranscriptSegment[] {
+  const cleanedSegments = segments.map(s => ({
+    ...s,
+    text: cleanSubtitleText(s.text)
+  })).filter(s => s.text.length > 0);
+
+  if (cleanedSegments.length === 0) return [];
+
+  const hasPunctuation = cleanedSegments.some(s => /[.!?~]/u.test(s.text));
+  const merged: TranscriptSegment[] = [];
+  let current = { ...cleanedSegments[0] };
+
+  for (let i = 1; i < cleanedSegments.length; i++) {
+    const next = cleanedSegments[i];
+    const timeGap = next.start - current.start;
+    let shouldMerge = false;
+
+    if (hasPunctuation) {
+      const trimmedCurrent = current.text.trim();
+      const endsWithPunc = /[.!?~"」』]$/u.test(trimmedCurrent);
+      if (!endsWithPunc && timeGap < 12) {
+        shouldMerge = true;
+      }
+    } else {
+      if (timeGap < 2.5) {
+        shouldMerge = true;
+      }
+    }
+
+    if (shouldMerge) {
+      current.text = `${current.text.trim()} ${next.text.trim()}`;
+    } else {
+      merged.push(current);
+      current = { ...next };
+    }
+  }
+  merged.push(current);
+  return merged;
 }
 
 function formatTime(seconds?: number): string {
