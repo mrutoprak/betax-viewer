@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { collection, getDocs, doc, getDoc, deleteDoc } from "firebase/firestore";
 import { db } from "./firebase";
-import { Play, ChevronLeft, Loader2, Languages, BookOpen, ArrowLeft, Bookmark, RefreshCw } from "lucide-react";
+import { Play, ChevronLeft, Loader2, BookOpen, ArrowLeft, RefreshCw } from "lucide-react";
 import "./App.css";
 
 declare var YT: any;
@@ -54,7 +54,7 @@ function formatTime(seconds?: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-type SideTab = "subtitles" | "words" | "saved";
+type SideTab = "subtitles";
 
 export default function App() {
   const [videos, setVideos] = useState<Video[]>([]);
@@ -62,7 +62,7 @@ export default function App() {
   const [words, setWords] = useState<Word[]>([]);
   const [transcriptSegments, setTranscriptSegments] = useState<TranscriptSegment[]>([]);
   const [screen, setScreen] = useState<"splash" | "player">("splash");
-  const [selectedWord, setSelectedWord] = useState<Word | null>(null);
+  const [wordPopup, setWordPopup] = useState<Word | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingWords, setLoadingWords] = useState(false);
   const currentTimeRef = useRef(0);
@@ -105,7 +105,7 @@ export default function App() {
   const handleSelectVideo = useCallback(async (video: Video) => {
     setSelectedVideo(video);
     setLoadingWords(true);
-    setSelectedWord(null);
+    setWordPopup(null);
     setSideTab("subtitles");
     setTranscriptSegments([]);
 
@@ -281,9 +281,8 @@ export default function App() {
     }
   };
 
-  // Click word → show details
   const handleSelectWord = (word: Word) => {
-    setSelectedWord(word);
+    setWordPopup(word);
   };
 
   // Back to splash
@@ -291,7 +290,7 @@ export default function App() {
     setSelectedVideo(null);
     setWords([]);
     setTranscriptSegments([]);
-    setSelectedWord(null);
+    setWordPopup(null);
     setScreen("splash");
     if (playerRef.current?.destroy) {
       playerRef.current.destroy();
@@ -448,38 +447,8 @@ export default function App() {
 
             {/* RIGHT: Side Panel */}
             <div className="player-sidebar">
-              {/* Tabs */}
-              <div className="sidebar-tabs">
-                <button
-                  className={`sidebar-tab ${sideTab === "subtitles" ? "active" : ""}`}
-                  onClick={() => setSideTab("subtitles")}
-                >
-                  <Languages size={16} />
-                  Altyazılar
-                </button>
-                <button
-                  className={`sidebar-tab ${sideTab === "words" ? "active" : ""}`}
-                  onClick={() => setSideTab("words")}
-                >
-                  <BookOpen size={16} />
-                  Sözcükler
-                  {uniqueWords.length > 0 && (
-                    <span className="tab-count purple">{uniqueWords.length}</span>
-                  )}
-                </button>
-                <button
-                  className={`sidebar-tab ${sideTab === "saved" ? "active" : ""}`}
-                  onClick={() => setSideTab("saved")}
-                >
-                  <Bookmark size={16} />
-                  Kaydedildi
-                  <span className="tab-count green">12</span>
-                </button>
-              </div>
-
-              {/* SUBTITLES TAB */}
-              {sideTab === "subtitles" && (
-                <div className="subtitles-content" ref={transcriptRef}>
+              {/* Transcript — tek sekme, sekme yok */}
+              <div className="subtitles-content" ref={transcriptRef}>
                   {loadingWords ? (
                     <div className="loading-state">
                       <Loader2 size={24} className="spin" />
@@ -633,109 +602,48 @@ export default function App() {
                     </div>
                   )}
                 </div>
-              )}
-
-              {/* WORDS TAB */}
-              {sideTab === "words" && (
-                <div className="words-content">
-                  {loadingWords ? (
-                    <div className="loading-state">
-                      <Loader2 size={24} className="spin" />
-                    </div>
-                  ) : uniqueWords.length === 0 ? (
-                    <div className="empty-state small">
-                      <p>Henüz sözcük eklenmemiş.</p>
-                    </div>
-                  ) : selectedWord ? (
-                    <div className="word-detail">
-                      <button
-                        className="word-detail-back"
-                        onClick={() => setSelectedWord(null)}
-                      >
-                        <ChevronLeft size={20} />
-                        <span>Sözcükler</span>
-                      </button>
-                      <div className="word-detail-content">
-                        <h2 className="word-detail-word">
-                          {selectedWord.word}
-                        </h2>
-                        {selectedWord.imageUrl && (
-                          <img
-                            src={selectedWord.imageUrl}
-                            alt={selectedWord.word}
-                            className="word-detail-image"
-                          />
-                        )}
-                        {selectedWord.turkishMeaning && (
-                          <div className="word-detail-section">
-                            <span className="detail-label">Anlamı</span>
-                            <p className="detail-value">
-                              {selectedWord.turkishMeaning}
-                            </p>
-                          </div>
-                        )}
-                        {selectedWord.keyword && (
-                          <div className="word-detail-section">
-                            <span className="detail-label">Anahtar Kelime</span>
-                            <p className="detail-value keyword">
-                              {selectedWord.keyword}
-                            </p>
-                          </div>
-                        )}
-                        {selectedWord.story && (
-                          <div className="word-detail-section">
-                            <span className="detail-label">Hikaye</span>
-                            <p className="detail-value story">
-                              {selectedWord.story}
-                            </p>
-                          </div>
-                        )}
-                        {selectedWord.sentenceText && (
-                          <div className="word-detail-section">
-                            <span className="detail-label">Cümle</span>
-                            <p className="detail-value sentence">
-                              {selectedWord.sentenceText}
-                            </p>
-                            {selectedWord.sentenceTranslation && (
-                              <p className="detail-value sentence-trans">
-                                {selectedWord.sentenceTranslation}
-                              </p>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="word-grid">
-                      {uniqueWords.map((w) => (
-                        <button
-                          key={w.id}
-                          className="word-card"
-                          onClick={() => handleSelectWord(w)}
-                        >
-                          <span className="word-card-text">
-                            {w.word.replace(/\s*\(.*?\)\s*/g, "")}
-                          </span>
-                          {w.turkishMeaning && (
-                            <span className="word-card-meaning">
-                              {w.turkishMeaning}
-                            </span>
+              {wordPopup && (
+                <>
+                  <div className="popup-overlay" onClick={() => setWordPopup(null)} />
+                  <div className="word-popup">
+                    <button className="popup-close" onClick={() => setWordPopup(null)}>✕</button>
+                    <div className="popup-content">
+                      <h2 className="popup-word">
+                        {wordPopup.word.replace(/\s*\(.*?\)\s*/g, "")}
+                      </h2>
+                      {wordPopup.imageUrl && (
+                        <img src={wordPopup.imageUrl} alt={wordPopup.word} className="popup-image" />
+                      )}
+                      {wordPopup.turkishMeaning && (
+                        <div className="popup-section">
+                          <span className="popup-label">Anlamı</span>
+                          <p className="popup-value">{wordPopup.turkishMeaning}</p>
+                        </div>
+                      )}
+                      {wordPopup.keyword && (
+                        <div className="popup-section">
+                          <span className="popup-label">Anahtar Kelime</span>
+                          <p className="popup-value keyword">{wordPopup.keyword}</p>
+                        </div>
+                      )}
+                      {wordPopup.story && (
+                        <div className="popup-section">
+                          <span className="popup-label">Hikaye</span>
+                          <p className="popup-value story">{wordPopup.story}</p>
+                        </div>
+                      )}
+                      {wordPopup.sentenceText && (
+                        <div className="popup-section">
+                          <span className="popup-label">Cümle</span>
+                          <p className="popup-value sentence">{wordPopup.sentenceText}</p>
+                          {wordPopup.sentenceTranslation && (
+                            <p className="popup-value sentence-trans">{wordPopup.sentenceTranslation}</p>
                           )}
-                        </button>
-                      ))}
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
-              )}
-
-              {/* SAVED TAB */}
-              {sideTab === "saved" && (
-                <div className="words-content">
-                  <div className="empty-state small">
-                    <p>Kaydedilen kelimeler</p>
-                    <p className="empty-hint">Studio'dan kaydettiğiniz kelimeler burada görünecek</p>
                   </div>
-                </div>
+                </>
               )}
             </div>
           </div>
