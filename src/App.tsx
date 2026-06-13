@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { collection, getDocs, doc, getDoc, deleteDoc } from "firebase/firestore";
 import { db } from "./firebase";
-import { Play, ChevronLeft, Loader2, BookOpen, ArrowLeft, RefreshCw } from "lucide-react";
+import { Play, Loader2, BookOpen, ArrowLeft, RefreshCw } from "lucide-react";
 import "./App.css";
 
 declare var YT: any;
@@ -54,26 +54,6 @@ function formatTime(seconds?: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-// === SRS ===
-export const SRS_INTERVALS = [
-  5 * 1000,           // 5 seconds
-  25 * 1000,          // 25 seconds
-  2 * 60 * 1000,      // 2 minutes
-  10 * 60 * 1000,     // 10 minutes
-  60 * 60 * 1000,     // 1 hour
-  5 * 60 * 60 * 1000, // 5 hours
-  24 * 60 * 60 * 1000 // 1 day
-];
-
-export const SRS_LABELS = ["5s", "25s", "2m", "10m", "1h", "5h", "1d"];
-
-interface SrsCard {
-  word: Word;
-  intervalIndex: number;
-  nextReviewTime: number; // ms timestamp
-  learned: boolean;       // öğrenme modunda görüldü mü?
-}
-
 type SideTab = "subtitles";
 
 export default function App() {
@@ -89,18 +69,17 @@ export default function App() {
   const [activeIndex, setActiveIndex] = useState(-1);
   const playerRef = useRef<any>(null);
   const pollRef = useRef<number>(0);
-  const srsTimerRef = useRef<any>(null);
   const transcriptRef = useRef<HTMLDivElement>(null);
   const [sideTab, setSideTab] = useState<SideTab>("subtitles");
 
-  // --- SRS States ---
-  const [learningMode, setLearningMode] = useState<boolean>(false);
-  const [learnCards, setLearnCards] = useState<SrsCard[]>([]);
-  const [learnIndex, setLearnIndex] = useState<number>(0);
-
-  const [srsQueue, setSrsQueue] = useState<SrsCard[]>([]);
-  const [activeSrsCard, setActiveSrsCard] = useState<SrsCard | null>(null);
-  const [srsPaused, setSrsPaused] = useState<boolean>(false);
+  // --- Yeni Öğrenme Akışı States ---
+  const [showWelcome, setShowWelcome] = useState<boolean>(false);
+  const [showSentence, setShowSentence] = useState<boolean>(false);
+  const [showFlashcards, setShowFlashcards] = useState<boolean>(false);
+  const [activeSentence, setActiveSentence] = useState<string>("");
+  const [activeSentenceTrans, setActiveSentenceTrans] = useState<string>("");
+  const [sentenceWords, setSentenceWords] = useState<Word[]>([]);
+  const [sentenceWordIndex, setSentenceWordIndex] = useState<number>(0);
 
   // Load videos from Firebase
   useEffect(() => {
@@ -139,13 +118,14 @@ export default function App() {
     setSideTab("subtitles");
     setTranscriptSegments([]);
 
-    // Reset SRS states
-    setLearningMode(false);
-    setLearnCards([]);
-    setLearnIndex(0);
-    setSrsQueue([]);
-    setActiveSrsCard(null);
-    setSrsPaused(false);
+    // Reset öğrenme akışı states
+    setShowWelcome(false);
+    setShowSentence(false);
+    setShowFlashcards(false);
+    setActiveSentence("");
+    setActiveSentenceTrans("");
+    setSentenceWords([]);
+    setSentenceWordIndex(0);
 
     try {
       const youtubeId = extractVideoId(video.videoUrl || "");
@@ -190,27 +170,8 @@ export default function App() {
       setTranscriptSegments(fetchedSegments);
       setScreen("player");
 
-      // Start learning mode for the very first sentence/transcript segment
-      if (fetchedSegments.length > 0) {
-        const firstSegment = fetchedSegments[0];
-        const sentenceText = firstSegment.text || "";
-        const matchedWords = allWords.filter(
-          (w) =>
-            (w.sentenceText?.trim().toLowerCase() || w.word.trim().toLowerCase()) ===
-            sentenceText.trim().toLowerCase()
-        );
-        if (matchedWords.length > 0) {
-          const cards: SrsCard[] = matchedWords.map(w => ({
-            word: w,
-            intervalIndex: 0,
-            nextReviewTime: 0,
-            learned: false
-          }));
-          setLearnCards(cards);
-          setLearnIndex(0);
-          setLearningMode(true);
-        }
-      }
+      // Video seçilince hoşgeldin ekranını aç
+      setShowWelcome(true);
     } catch (e) {
       console.error("Failed to load words:", e);
     } finally {
@@ -246,7 +207,7 @@ export default function App() {
         height: "100%",
         playerVars: {
           rel: 0,
-          autoplay: learningMode ? 0 : 1, // Learning overlay duruyorsa autoplay yapma
+          autoplay: (showWelcome || showSentence || showFlashcards) ? 0 : 1, // Herhangi bir öğrenme overlay'i varsa autoplay yapma
           playsinline: 1,
           controls: 1,
         },
@@ -262,9 +223,9 @@ export default function App() {
       currentTimeRef.current = 0;
       setActiveIndex(-1);
     };
-  }, [screen, selectedVideo, learningMode]);
+  }, [screen, selectedVideo, showWelcome, showSentence, showFlashcards]);
 
-  // Poll current time via requestAnimationFrame (Studio gibi)
+  // Poll current time via requestAnimationFrame
   useEffect(() => {
     if (screen !== "player" || transcriptSegments.length === 0) return;
 
@@ -274,7 +235,7 @@ export default function App() {
           const t = playerRef.current.getCurrentTime();
           currentTimeRef.current = t;
 
-          // Aktif segment index'ini bul — Studio'daki mantığın aynısı
+          // Aktif segment index'ini bul
           const idx = transcriptSegments.findIndex((s, i) => {
             const segStart = s.start;
             if (segStart === undefined || segStart === null) return false;
@@ -297,77 +258,6 @@ export default function App() {
       if (pollRef.current) cancelAnimationFrame(pollRef.current);
     };
   }, [screen, transcriptSegments, activeIndex]);
-
-  // Handle activeIndex changes to inject new words into SRS queue
-  useEffect(() => {
-    if (activeIndex === -1 || transcriptSegments.length === 0) return;
-    const segment = transcriptSegments[activeIndex];
-    const sentenceText = segment.text || "";
-    const matchedWords = words.filter(
-      (w) =>
-        (w.sentenceText?.trim().toLowerCase() || w.word.trim().toLowerCase()) ===
-        sentenceText.trim().toLowerCase()
-    );
-
-    if (matchedWords.length > 0) {
-      setSrsQueue(prev => {
-        // Zaten kuyrukta olan kelimeleri eklemeyelim (duplikasyon önleme)
-        const newCards: SrsCard[] = [];
-        matchedWords.forEach(w => {
-          if (!prev.some(card => card.word.id === w.id)) {
-            newCards.push({
-              word: w,
-              intervalIndex: 0,
-              nextReviewTime: Date.now() + SRS_INTERVALS[0],
-              learned: true
-            });
-          }
-        });
-        return [...prev, ...newCards];
-      });
-    }
-  }, [activeIndex, transcriptSegments, words]);
-
-  // SRS Poll Timer (runs every 500ms)
-  useEffect(() => {
-    if (screen !== "player") return;
-
-    const checkSrsQueue = () => {
-      const now = Date.now();
-      // srsQueue'da süresi gelmiş (nextReviewTime <= now) kartları bul
-      const dueCards = srsQueue.filter(card => card.nextReviewTime <= now);
-
-      if (dueCards.length > 0 && !activeSrsCard && !learningMode) {
-        // Önemli Kural: Aynı cümledeki tüm kelimelerin intervalIndex > 0 (görülmüş) olup olmadığını kontrol et
-        const dueToShow = dueCards.find(card => {
-          const sentence = card.word.sentenceText || "";
-          const sameSentenceCards = srsQueue.filter(
-            c => (c.word.sentenceText || "") === sentence
-          );
-          // O cümledeki tüm SRS kartlarının en az 1 kere görülmüş olması gerekir (yani intervalIndex > 0)
-          const allSeen = sameSentenceCards.every(c => c.intervalIndex > 0);
-          return allSeen;
-        });
-
-        if (dueToShow) {
-          // Pause video
-          if (playerRef.current?.pauseVideo) {
-            playerRef.current.pauseVideo();
-          }
-          setSrsPaused(true);
-          setActiveSrsCard(dueToShow);
-        }
-      }
-    };
-
-    srsTimerRef.current = setInterval(checkSrsQueue, 500);
-
-    return () => {
-      if (srsTimerRef.current) {
-        clearInterval(srsTimerRef.current);
-      }
-    };
-  }, [srsQueue, activeSrsCard, learningMode]);
 
   // Active segment sıfırlama — yeni video seçilince
   useEffect(() => {
@@ -466,103 +356,22 @@ export default function App() {
       setTranscriptSegments(fetchedSegments);
       setActiveIndex(-1);
 
-      // Refresh states for learning
-      setLearningMode(false);
-      setLearnCards([]);
-      setLearnIndex(0);
-      setSrsQueue([]);
-      setActiveSrsCard(null);
-      setSrsPaused(false);
+      // Reset öğrenme akışı states
+      setShowWelcome(false);
+      setShowSentence(false);
+      setShowFlashcards(false);
+      setActiveSentence("");
+      setActiveSentenceTrans("");
+      setSentenceWords([]);
+      setSentenceWordIndex(0);
 
-      if (fetchedSegments.length > 0) {
-        const firstSegment = fetchedSegments[0];
-        const sentenceText = firstSegment.text || "";
-        const matchedWords = allWords.filter(
-          (w) =>
-            (w.sentenceText?.trim().toLowerCase() || w.word.trim().toLowerCase()) ===
-            sentenceText.trim().toLowerCase()
-        );
-        if (matchedWords.length > 0) {
-          const cards: SrsCard[] = matchedWords.map(w => ({
-            word: w,
-            intervalIndex: 0,
-            nextReviewTime: 0,
-            learned: false
-          }));
-          setLearnCards(cards);
-          setLearnIndex(0);
-          setLearningMode(true);
-        }
-      }
+      setShowWelcome(true);
     } catch (e) {
       console.error('Refresh error:', e);
     } finally {
       setLoadingWords(false);
     }
   }, [selectedVideo]);
-
-  // Handle learning mode Next click
-  const handleLearnNext = () => {
-    const updatedCards = [...learnCards];
-    updatedCards[learnIndex] = {
-      ...updatedCards[learnIndex],
-      learned: true
-    };
-    setLearnCards(updatedCards);
-
-    if (learnIndex + 1 < learnCards.length) {
-      setLearnIndex(learnIndex + 1);
-    } else {
-      // Tüm öğrenme kartları bitti, videoyu başlatabiliriz
-      setLearningMode(false);
-      // Bu kartları SRS kuyruğuna da ilk seviyeden dahil et
-      const srsCards: SrsCard[] = updatedCards.map(c => ({
-        ...c,
-        intervalIndex: 1, // Zaten 1 kere öğrenildi / görüldü
-        nextReviewTime: Date.now() + SRS_INTERVALS[1]
-      }));
-      setSrsQueue(prev => {
-        const filtered = prev.filter(p => !srsCards.some(sc => sc.word.id === p.word.id));
-        return [...filtered, ...srsCards];
-      });
-
-      if (playerRef.current?.playVideo) {
-        playerRef.current.playVideo();
-      }
-    }
-  };
-
-  // Handle SRS "Next" click
-  const handleSrsNext = () => {
-    if (!activeSrsCard) return;
-
-    const nextIndex = Math.min(activeSrsCard.intervalIndex + 1, SRS_INTERVALS.length - 1);
-    const updatedCard: SrsCard = {
-      ...activeSrsCard,
-      intervalIndex: nextIndex,
-      nextReviewTime: Date.now() + SRS_INTERVALS[nextIndex]
-    };
-
-    setSrsQueue(prev => prev.map(card => card.word.id === activeSrsCard.word.id ? updatedCard : card));
-    setActiveSrsCard(null);
-    setSrsPaused(false);
-
-    // Play video again
-    if (playerRef.current?.playVideo) {
-      playerRef.current.playVideo();
-    }
-  };
-
-  // Get unique words for the words tab
-  const uniqueWords = (() => {
-    const seen = new Set<string>();
-    return words.filter((w) => {
-      const key = w.word.toLowerCase();
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-  })();
 
   if (loading) {
     return (
@@ -572,6 +381,9 @@ export default function App() {
       </div>
     );
   }
+
+  // Aktif cümle sayısını hesapla
+  const activeSentenceCount = transcriptSegments.length;
 
   return (
     <div className="viewer-container">
@@ -854,104 +666,145 @@ export default function App() {
         </div>
       )}
 
-      {/* LEARNING MODE OVERLAY */}
-      {learningMode && learnCards.length > 0 && (
+      {/* 1. HOŞGELDİN OVERLAY'İ */}
+      {showWelcome && (
         <>
           <div className="popup-overlay srs-overlay-backdrop" />
           <div className="word-popup srs-popup-container">
-            <div className="srs-header-counter">
-              Öğrenme Modu — {learnIndex + 1} / {learnCards.length}
+            <div className="popup-content" style={{ textAlign: "center", padding: "20px 10px" }}>
+              <h2 className="popup-word" style={{ fontSize: "24px", marginBottom: "15px" }}>Merhaba!</h2>
+              <p style={{ fontSize: "16px", marginBottom: "25px", lineHeight: "1.5" }}>
+                Şu anda aktif <strong>{activeSentenceCount}</strong> adet cümlen var.
+              </p>
+              <p style={{ fontSize: "16px", marginBottom: "30px" }}>
+                İlk cümleden başlamak ister misin?
+              </p>
             </div>
-            <div className="popup-content">
-              <h2 className="popup-word">
-                {learnCards[learnIndex].word.word.replace(/\s*\(.*?\)\s*/g, "")}
-              </h2>
-              {learnCards[learnIndex].word.imageUrl && (
-                <img src={learnCards[learnIndex].word.imageUrl} alt={learnCards[learnIndex].word.word} className="popup-image" />
-              )}
-              {learnCards[learnIndex].word.turkishMeaning && (
-                <div className="popup-section">
-                  <span className="popup-label">Anlamı</span>
-                  <p className="popup-value">{learnCards[learnIndex].word.turkishMeaning}</p>
-                </div>
-              )}
-              {learnCards[learnIndex].word.keyword && (
-                <div className="popup-section">
-                  <span className="popup-label">Anahtar Kelime</span>
-                  <p className="popup-value keyword">{learnCards[learnIndex].word.keyword}</p>
-                </div>
-              )}
-              {learnCards[learnIndex].word.story && (
-                <div className="popup-section">
-                  <span className="popup-label">Hikaye</span>
-                  <p className="popup-value story">{learnCards[learnIndex].word.story}</p>
-                </div>
-              )}
-              {learnCards[learnIndex].word.sentenceText && (
-                <div className="popup-section">
-                  <span className="popup-label">Cümle</span>
-                  <p className="popup-value sentence">{learnCards[learnIndex].word.sentenceText}</p>
-                  {learnCards[learnIndex].word.sentenceTranslation && (
-                    <p className="popup-value sentence-trans">{learnCards[learnIndex].word.sentenceTranslation}</p>
-                  )}
-                </div>
-              )}
-            </div>
-            <div className="srs-action-area">
-              <button className="srs-next-btn" onClick={handleLearnNext}>
-                {learnIndex + 1 === learnCards.length ? "Tamam, videoyu başlat" : "Next"}
+            <div className="srs-action-area" style={{ display: "flex", gap: "10px", justifyContent: "center" }}>
+              <button
+                className="srs-next-btn"
+                style={{ flex: 1, maxWidth: "150px" }}
+                onClick={() => {
+                  if (transcriptSegments.length > 0) {
+                    setActiveSentence(transcriptSegments[0].text || "");
+                    setActiveSentenceTrans(transcriptSegments[0].translation || "");
+                    setShowSentence(true);
+                  } else {
+                    if (playerRef.current?.playVideo) {
+                      playerRef.current.playVideo();
+                    }
+                  }
+                  setShowWelcome(false);
+                }}
+              >
+                Evet
+              </button>
+              <button
+                className="srs-next-btn"
+                style={{ flex: 1, maxWidth: "150px", background: "#666" }}
+                onClick={() => {
+                  setShowWelcome(false);
+                  if (playerRef.current?.playVideo) {
+                    playerRef.current.playVideo();
+                  }
+                }}
+              >
+                Hayır
               </button>
             </div>
           </div>
         </>
       )}
 
-      {/* SRS MODE OVERLAY */}
-      {activeSrsCard && (
+      {/* 2. CÜMLE OVERLAY'İ */}
+      {showSentence && (
+        <>
+          <div className="popup-overlay srs-overlay-backdrop" />
+          <div className="word-popup srs-popup-container">
+            <div className="popup-content" style={{ textAlign: "center", padding: "20px 10px" }}>
+              <h2 className="popup-word" style={{ fontSize: "22px", marginBottom: "15px", color: "#3b82f6" }}>
+                {activeSentence}
+              </h2>
+              <p style={{ fontSize: "18px", color: "#9ca3af", marginBottom: "30px", fontStyle: "italic" }}>
+                {activeSentenceTrans}
+              </p>
+            </div>
+            <div className="srs-action-area" style={{ display: "flex", justifyContent: "center" }}>
+              <button
+                className="srs-next-btn"
+                style={{ width: "100%", maxWidth: "250px" }}
+                onClick={() => {
+                  const filteredWords = words.filter(
+                    (w) =>
+                      (w.sentenceText?.trim().toLowerCase() || w.word.trim().toLowerCase()) ===
+                      activeSentence.trim().toLowerCase()
+                  );
+                  setSentenceWords(filteredWords);
+                  setSentenceWordIndex(0);
+                  setShowFlashcards(true);
+                  setShowSentence(false);
+                }}
+              >
+                Bu cümleyi öğren
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* 3. FLASHCARD OVERLAY'İ */}
+      {showFlashcards && sentenceWords.length > 0 && (
         <>
           <div className="popup-overlay srs-overlay-backdrop" />
           <div className="word-popup srs-popup-container">
             <div className="srs-header-counter">
-              SRS Tekrarı — Seviye: {SRS_LABELS[activeSrsCard.intervalIndex]}
+              Kart — {sentenceWordIndex + 1} / {sentenceWords.length}
             </div>
             <div className="popup-content">
               <h2 className="popup-word">
-                {activeSrsCard.word.word.replace(/\s*\(.*?\)\s*/g, "")}
+                {sentenceWords[sentenceWordIndex].word.replace(/\s*\(.*?\)\s*/g, "")}
               </h2>
-              {activeSrsCard.word.imageUrl && (
-                <img src={activeSrsCard.word.imageUrl} alt={activeSrsCard.word.word} className="popup-image" />
+              {sentenceWords[sentenceWordIndex].imageUrl && (
+                <img
+                  src={sentenceWords[sentenceWordIndex].imageUrl}
+                  alt={sentenceWords[sentenceWordIndex].word}
+                  className="popup-image"
+                />
               )}
-              {activeSrsCard.word.turkishMeaning && (
+              {sentenceWords[sentenceWordIndex].turkishMeaning && (
                 <div className="popup-section">
                   <span className="popup-label">Anlamı</span>
-                  <p className="popup-value">{activeSrsCard.word.turkishMeaning}</p>
+                  <p className="popup-value">{sentenceWords[sentenceWordIndex].turkishMeaning}</p>
                 </div>
               )}
-              {activeSrsCard.word.keyword && (
+              {sentenceWords[sentenceWordIndex].keyword && (
                 <div className="popup-section">
                   <span className="popup-label">Anahtar Kelime</span>
-                  <p className="popup-value keyword">{activeSrsCard.word.keyword}</p>
+                  <p className="popup-value keyword">{sentenceWords[sentenceWordIndex].keyword}</p>
                 </div>
               )}
-              {activeSrsCard.word.story && (
+              {sentenceWords[sentenceWordIndex].story && (
                 <div className="popup-section">
                   <span className="popup-label">Hikaye</span>
-                  <p className="popup-value story">{activeSrsCard.word.story}</p>
-                </div>
-              )}
-              {activeSrsCard.word.sentenceText && (
-                <div className="popup-section">
-                  <span className="popup-label">Cümle</span>
-                  <p className="popup-value sentence">{activeSrsCard.word.sentenceText}</p>
-                  {activeSrsCard.word.sentenceTranslation && (
-                    <p className="popup-value sentence-trans">{activeSrsCard.word.sentenceTranslation}</p>
-                  )}
+                  <p className="popup-value story">{sentenceWords[sentenceWordIndex].story}</p>
                 </div>
               )}
             </div>
             <div className="srs-action-area">
-              <button className="srs-next-btn" onClick={handleSrsNext}>
-                Next
+              <button
+                className="srs-next-btn"
+                onClick={() => {
+                  if (sentenceWordIndex + 1 < sentenceWords.length) {
+                    setSentenceWordIndex(sentenceWordIndex + 1);
+                  } else {
+                    setShowFlashcards(false);
+                    if (playerRef.current?.playVideo) {
+                      playerRef.current.playVideo();
+                    }
+                  }
+                }}
+              >
+                {sentenceWordIndex + 1 === sentenceWords.length ? "Tamam" : "Next"}
               </button>
             </div>
           </div>
