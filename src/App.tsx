@@ -669,70 +669,59 @@ export default function App() {
       {/* 1. HOŞGELDİN OVERLAY'İ */}
       {showWelcome && (
         <>
-          <div className="popup-overlay srs-overlay-backdrop" />
-          <div className="word-popup srs-popup-container">
-            <div className="popup-content" style={{ textAlign: "center", padding: "20px 10px" }}>
-              <h2 className="popup-word" style={{ fontSize: "24px", marginBottom: "15px" }}>Merhaba!</h2>
-              <p style={{ fontSize: "16px", marginBottom: "25px", lineHeight: "1.5" }}>
+          <div className="popup-overlay" />
+          <div className="word-popup">
+            <div className="welcome-content">
+              <h2>Merhaba! 👋</h2>
+              <p>
                 Şu anda aktif <strong>{activeSentenceCount}</strong> adet cümlen var.
               </p>
-              <p style={{ fontSize: "16px", marginBottom: "30px" }}>
-                İlk cümleden başlamak ister misin?
-              </p>
-            </div>
-            <div className="srs-action-area" style={{ display: "flex", gap: "10px", justifyContent: "center" }}>
-              <button
-                className="srs-next-btn"
-                style={{ flex: 1, maxWidth: "150px" }}
-                onClick={() => {
-                  if (transcriptSegments.length > 0) {
-                    setActiveSentence(transcriptSegments[0].text || "");
-                    setActiveSentenceTrans(transcriptSegments[0].translation || "");
-                    setShowSentence(true);
-                  } else {
+              <p>İlk cümleden başlamak ister misin?</p>
+              <div className="welcome-actions">
+                <button
+                  className="welcome-btn"
+                  onClick={() => {
+                    if (transcriptSegments.length > 0) {
+                      setActiveSentence(transcriptSegments[0].text || "");
+                      setActiveSentenceTrans(transcriptSegments[0].translation || "");
+                      setShowSentence(true);
+                    } else {
+                      if (playerRef.current?.playVideo) {
+                        playerRef.current.playVideo();
+                      }
+                    }
+                    setShowWelcome(false);
+                  }}
+                >
+                  Evet
+                </button>
+                <button
+                  className="welcome-btn secondary"
+                  onClick={() => {
+                    setShowWelcome(false);
                     if (playerRef.current?.playVideo) {
                       playerRef.current.playVideo();
                     }
-                  }
-                  setShowWelcome(false);
-                }}
-              >
-                Evet
-              </button>
-              <button
-                className="srs-next-btn"
-                style={{ flex: 1, maxWidth: "150px", background: "#666" }}
-                onClick={() => {
-                  setShowWelcome(false);
-                  if (playerRef.current?.playVideo) {
-                    playerRef.current.playVideo();
-                  }
-                }}
-              >
-                Hayır
-              </button>
+                  }}
+                >
+                  Hayır
+                </button>
+              </div>
             </div>
           </div>
         </>
       )}
 
-      {/* 2. CÜMLE OVERLAY'İ */}
+      {/* 2. CÜMLE OVERLAY */}
       {showSentence && (
         <>
-          <div className="popup-overlay srs-overlay-backdrop" />
-          <div className="word-popup srs-popup-container">
-            <div className="popup-content" style={{ textAlign: "center", padding: "20px 10px" }}>
-              <h2 className="popup-word" style={{ fontSize: "22px", marginBottom: "15px", color: "#3b82f6" }}>
-                {activeSentence}
-              </h2>
-              <p style={{ fontSize: "18px", color: "#9ca3af", marginBottom: "30px", fontStyle: "italic" }}>
-                {activeSentenceTrans}
-              </p>
-            </div>
-            <div className="srs-action-area" style={{ display: "flex", justifyContent: "center" }}>
+          <div className="popup-overlay" />
+          <div className="word-popup">
+            <div className="sentence-content">
+              <h2>{activeSentence}</h2>
+              <p className="translation">{activeSentenceTrans}</p>
               <button
-                className="srs-next-btn"
-                style={{ width: "100%", maxWidth: "250px" }}
+                className="welcome-btn"
                 onClick={() => {
                   const filteredWords = words.filter(
                     (w) =>
@@ -752,12 +741,12 @@ export default function App() {
         </>
       )}
 
-      {/* 3. FLASHCARD OVERLAY'İ */}
+      {/* 3. FLASHCARD OVERLAY */}
       {showFlashcards && sentenceWords.length > 0 && (
         <>
-          <div className="popup-overlay srs-overlay-backdrop" />
-          <div className="word-popup srs-popup-container">
-            <div className="srs-header-counter">
+          <div className="popup-overlay" />
+          <div className="word-popup">
+            <div className="popup-header-counter">
               Kart — {sentenceWordIndex + 1} / {sentenceWords.length}
             </div>
             <div className="popup-content">
@@ -790,9 +779,9 @@ export default function App() {
                 </div>
               )}
             </div>
-            <div className="srs-action-area">
+            <div className="popup-action">
               <button
-                className="srs-next-btn"
+                className="popup-btn"
                 onClick={() => {
                   if (sentenceWordIndex + 1 < sentenceWords.length) {
                     setSentenceWordIndex(sentenceWordIndex + 1);
