@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { collection, getDocs, doc, getDoc } from "firebase/firestore";
 import { db } from "./firebase";
-import { Play, ChevronLeft, Loader2, Languages } from "lucide-react";
+import { Play, ChevronLeft, Loader2, Languages, BookOpen, ArrowLeft } from "lucide-react";
 import "./App.css";
 
 declare var YT: any;
@@ -12,7 +12,6 @@ interface Word {
   turkishMeaning?: string;
   keyword?: string;
   story?: string;
-  textContent?: string;
   imageUrl?: string;
   sentenceText?: string;
   sentenceTranslation?: string;
@@ -34,7 +33,19 @@ interface Video {
   createdAt?: any;
 }
 
-type Screen = "splash" | "letters" | "word";
+function extractVideoId(url: string): string | null {
+  const patterns = [
+    /(?:youtube\.com\/watch\?v=)([a-zA-Z0-9_-]{11})/,
+    /(?:youtu\.be\/)([a-zA-Z0-9_-]{11})/,
+    /(?:youtube\.com\/shorts\/)([a-zA-Z0-9_-]{11})/,
+    /(?:youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/,
+  ];
+  for (const p of patterns) {
+    const m = url.match(p);
+    if (m?.[1]) return m[1];
+  }
+  return null;
+}
 
 function formatTime(seconds?: number): string {
   if (seconds === undefined) return "0:00";
@@ -43,19 +54,24 @@ function formatTime(seconds?: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
+type SideTab = "subtitles" | "words";
+
 export default function App() {
   const [videos, setVideos] = useState<Video[]>([]);
   const [selectedVideo, setSelectedVideo] = useState<Video | null>(null);
   const [words, setWords] = useState<Word[]>([]);
   const [transcriptSegments, setTranscriptSegments] = useState<TranscriptSegment[]>([]);
-  const [screen, setScreen] = useState<Screen>("splash");
+  const [screen, setScreen] = useState<"splash" | "player">("splash");
   const [selectedWord, setSelectedWord] = useState<Word | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingWords, setLoadingWords] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const playerRef = useRef<any>(null);
   const pollRef = useRef<number>(0);
+  const transcriptRef = useRef<HTMLDivElement>(null);
+  const [sideTab, setSideTab] = useState<SideTab>("subtitles");
 
+  // Load videos from Firebase
   useEffect(() => {
     const load = async () => {
       try {
@@ -71,24 +87,32 @@ export default function App() {
     load();
   }, []);
 
+  // Handle video selection
   const handleSelectVideo = useCallback(async (video: Video) => {
     setSelectedVideo(video);
     setLoadingWords(true);
+    setSelectedWord(null);
+    setSideTab("subtitles");
     setTranscriptSegments([]);
 
     try {
+      const youtubeId = extractVideoId(video.videoUrl || "");
+      
+      // Load words from Firebase
       const q = collection(db, "words");
       const snap = await getDocs(q);
       const allWords = snap.docs
         .map((d) => ({ id: d.id, ...d.data() } as Word))
-        .filter((w) => w.id.startsWith(video.id) || (w as any).folderId === video.id || (w as any).videoId === video.id)
+        .filter((w) => {
+          const wid = w.id.startsWith(youtubeId) || w.videoId === youtubeId || w.id.startsWith(video.id) || (w as any).folderId === video.id;
+          return wid;
+        })
         .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
       setWords(allWords);
 
-      // Load transcript
+      // Load transcript from Firebase
       try {
         let loaded = false;
-        const youtubeId = video.videoUrl?.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/shorts\/)([a-zA-Z0-9_-]{11})/)?.[1];
         if (youtubeId) {
           const ts = await getDoc(doc(db, "transcripts", youtubeId));
           if (ts.exists() && ts.data().segments?.length > 0) {
@@ -104,7 +128,7 @@ export default function App() {
         }
       } catch {}
 
-      setScreen("letters");
+      setScreen("player");
     } catch (e) {
       console.error("Failed to load words:", e);
     } finally {
@@ -112,12 +136,12 @@ export default function App() {
     }
   }, []);
 
-  // YouTube player — studio pattern
+  // YouTube player setup
   useEffect(() => {
-    const youtubeId = selectedVideo?.videoUrl?.match(
-      /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/shorts\/)([a-zA-Z0-9_-]{11})/
-    )?.[1];
-    if (screen !== "letters" || !youtubeId) return;
+    const youtubeId = selectedVideo?.videoUrl
+      ? extractVideoId(selectedVideo.videoUrl)
+      : null;
+    if (screen !== "player" || !youtubeId) return;
 
     if (typeof YT === "undefined") {
       const tag = document.createElement("script");
@@ -126,7 +150,10 @@ export default function App() {
     }
 
     const init = () => {
-      if (typeof YT === "undefined" || !YT.Player) { setTimeout(init, 500); return; }
+      if (typeof YT === "undefined" || !YT.Player) {
+        setTimeout(init, 500);
+        return;
+      }
       const container = document.getElementById("youtube-player");
       if (!container) return;
       container.innerHTML = "";
@@ -135,61 +162,115 @@ export default function App() {
         videoId: youtubeId,
         width: "100%",
         height: "100%",
-        playerVars: { rel: 0, autoplay: 1, playsinline: 1, controls: 1 },
+        playerVars: {
+          rel: 0,
+          autoplay: 1,
+          playsinline: 1,
+          controls: 1,
+        },
       });
     };
     init();
 
     return () => {
-      if (playerRef.current?.destroy) { playerRef.current.destroy(); playerRef.current = null; }
+      if (playerRef.current?.destroy) {
+        playerRef.current.destroy();
+        playerRef.current = null;
+      }
       setCurrentTime(0);
     };
   }, [screen, selectedVideo]);
 
-  // Time polling
+  // Poll current time for sync
   useEffect(() => {
-    if (screen !== "letters") return;
+    if (screen !== "player") return;
     const poll = () => {
       if (playerRef.current?.getCurrentTime) {
-        try { setCurrentTime(playerRef.current.getCurrentTime()); } catch {}
+        try {
+          setCurrentTime(playerRef.current.getCurrentTime());
+        } catch {}
       }
       pollRef.current = window.setTimeout(poll, 100);
     };
     poll();
-    return () => { if (pollRef.current) clearTimeout(pollRef.current); };
+    return () => {
+      if (pollRef.current) clearTimeout(pollRef.current);
+    };
   }, [screen]);
 
-  // Active segment
+  // Active segment index
   const activeIndex = (() => {
     if (!transcriptSegments.length || !currentTime) return -1;
     let idx = -1;
     for (let i = 0; i < transcriptSegments.length; i++) {
-      if (transcriptSegments[i].start !== undefined && currentTime >= transcriptSegments[i].start!) idx = i;
+      if (
+        transcriptSegments[i].start !== undefined &&
+        currentTime >= transcriptSegments[i].start!
+      ) {
+        idx = i;
+      }
     }
     return idx;
   })();
 
-  const getWordsForSentence = useCallback((sentenceText: string): Word[] => {
-    return words.filter(w => (w.sentenceText?.trim().toLowerCase() || w.word.trim().toLowerCase()) === sentenceText.trim().toLowerCase());
-  }, [words]);
+  // Auto-scroll transcript
+  useEffect(() => {
+    if (activeIndex === -1 || !transcriptRef.current) return;
+    const el = transcriptRef.current.querySelector(
+      `[data-seg-idx="${activeIndex}"]`
+    );
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [activeIndex]);
 
-  const handleSelectWord = useCallback((word: Word) => {
+  // Get words for a sentence
+  const getWordsForSentence = useCallback(
+    (sentenceText: string): Word[] => {
+      return words.filter(
+        (w) =>
+          (w.sentenceText?.trim().toLowerCase() || w.word.trim().toLowerCase()) ===
+          sentenceText.trim().toLowerCase()
+      );
+    },
+    [words]
+  );
+
+  // Click segment → seek video
+  const handleSegmentClick = (start?: number) => {
+    if (start !== undefined && playerRef.current?.seekTo) {
+      playerRef.current.seekTo(start, true);
+    }
+  };
+
+  // Click word → show details
+  const handleSelectWord = (word: Word) => {
     setSelectedWord(word);
-    setScreen("word");
-  }, []);
+  };
 
-  const handleBackToLetters = useCallback(() => {
-    setSelectedWord(null);
-    setScreen("letters");
-  }, []);
-
+  // Back to splash
   const handleBackToSplash = useCallback(() => {
     setSelectedVideo(null);
     setWords([]);
     setTranscriptSegments([]);
     setSelectedWord(null);
     setScreen("splash");
+    if (playerRef.current?.destroy) {
+      playerRef.current.destroy();
+      playerRef.current = null;
+    }
   }, []);
+
+  // Get unique words for the words tab
+  const uniqueWords = (() => {
+    const seen = new Set<string>();
+    return words.filter((w) => {
+      const key = w.word.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  })();
 
   if (loading) {
     return (
@@ -202,20 +283,38 @@ export default function App() {
 
   return (
     <div className="viewer-container">
+      {/* SPLASH SCREEN */}
       {screen === "splash" && (
         <div className="splash">
           <div className="splash-header">
-            <h1>Betax Viewer</h1>
-            <p className="subtitle">Bir video seç</p>
+            <div className="splash-logo">
+              <BookOpen size={28} />
+              <h1>Betax</h1>
+            </div>
+            <p className="splash-subtitle">Bir video seçerek kelime öğrenmeye başla</p>
           </div>
           <div className="video-list">
             {videos.length === 0 ? (
-              <p className="empty-text">Henüz video yok. Studio'dan ekle.</p>
+              <div className="empty-state">
+                <Play size={48} className="empty-icon" />
+                <p>Henüz video yok</p>
+                <p className="empty-hint">Studio'dan video ekleyip yayınlayın</p>
+              </div>
             ) : (
               videos.map((v) => (
-                <button key={v.id} className="video-card" onClick={() => handleSelectVideo(v)}>
-                  <Play size={20} />
-                  <span>{v.name || v.title || v.id}</span>
+                <button
+                  key={v.id}
+                  className="video-card"
+                  onClick={() => handleSelectVideo(v)}
+                >
+                  <div className="video-card-thumb">
+                    <Play size={18} />
+                  </div>
+                  <div className="video-card-info">
+                    <span className="video-card-title">
+                      {v.name || v.title || v.id}
+                    </span>
+                  </div>
                 </button>
               ))
             )}
@@ -223,85 +322,202 @@ export default function App() {
         </div>
       )}
 
-      {screen === "letters" && selectedVideo && (
-        <div className="h-full flex flex-col bg-[#0f0f0f]">
-          <div className="flex-none px-4 pt-[calc(0.75rem+env(safe-area-inset-top))] pb-2 bg-[#0f0f0f] z-20">
-            <div className="flex items-center gap-2">
-              <button onClick={handleBackToSplash} className="text-gray-400 hover:text-white p-1.5 transition-colors">
-                <ChevronLeft size={20} />
-              </button>
-              <div className="flex-1">
-                <h2 className="text-white text-[15px] font-semibold">{selectedVideo.name || selectedVideo.title || ""}</h2>
-              </div>
+      {/* PLAYER SCREEN */}
+      {screen === "player" && selectedVideo && (
+        <div className="player-screen">
+          {/* Top bar */}
+          <div className="player-topbar">
+            <button onClick={handleBackToSplash} className="topbar-back">
+              <ArrowLeft size={20} />
+            </button>
+            <div className="topbar-title">
+              <span>{selectedVideo.name || selectedVideo.title || ""}</span>
             </div>
           </div>
 
-          <div className="flex-grow overflow-hidden">
-            <div className="h-full flex gap-0">
-              <div className="w-[55%] h-full flex flex-col items-center justify-center p-2 transition-all duration-300">
-                <div className="w-full h-full bg-black rounded-xl overflow-hidden shadow-2xl flex items-center justify-center">
-                  <div className="relative w-full" style={{ paddingTop: "56.25%" }}>
-                    <div id="youtube-player" className="absolute inset-0 w-full h-full"></div>
-                  </div>
+          {/* Main content */}
+          <div className="player-content">
+            {/* LEFT: YouTube Player */}
+            <div className="player-video">
+              <div className="video-wrapper">
+                <div className="video-aspect">
+                  <div id="youtube-player" className="video-iframe"></div>
                 </div>
               </div>
+            </div>
 
-              <div className="w-[45%] min-w-[320px] h-full bg-[#0f0f0f] border-l border-white/5 flex flex-col overflow-hidden">
-                <div className="flex-none flex border-b border-white/10 bg-[#1a1a1a]">
-                  <div className="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-[12px] font-semibold text-white">
-                    <Languages size={14} />
-                    Altyazılar
-                  </div>
-                </div>
+            {/* RIGHT: Side Panel */}
+            <div className="player-sidebar">
+              {/* Tabs */}
+              <div className="sidebar-tabs">
+                <button
+                  className={`sidebar-tab ${sideTab === "subtitles" ? "active" : ""}`}
+                  onClick={() => setSideTab("subtitles")}
+                >
+                  <Languages size={14} />
+                  Altyazılar
+                </button>
+                <button
+                  className={`sidebar-tab ${sideTab === "words" ? "active" : ""}`}
+                  onClick={() => setSideTab("words")}
+                >
+                  <BookOpen size={14} />
+                  Sözcükler
+                  {uniqueWords.length > 0 && (
+                    <span className="tab-count">{uniqueWords.length}</span>
+                  )}
+                </button>
+              </div>
 
-                <div className="flex-grow overflow-y-auto">
+              {/* SUBTITLES TAB */}
+              {sideTab === "subtitles" && (
+                <div className="subtitles-content" ref={transcriptRef}>
                   {loadingWords ? (
-                    <div className="flex items-center justify-center h-full"><Loader2 size={24} className="spin" /></div>
+                    <div className="loading-state">
+                      <Loader2 size={24} className="spin" />
+                    </div>
                   ) : transcriptSegments.length === 0 && words.length === 0 ? (
-                    <div className="flex items-center justify-center h-full text-gray-500 text-sm px-4">Henüz kelime eklenmemiş.</div>
+                    <div className="empty-state small">
+                      <p>Henüz altyazı eklenmemiş.</p>
+                    </div>
                   ) : (
                     <div>
-                      {(transcriptSegments.length > 0 ? transcriptSegments : (() => {
-                        const seen = new Set<string>();
-                        const segs: { text: string; translation: string; words: Word[] }[] = [];
-                        words.forEach(w => {
-                          const key = w.sentenceText?.trim() || w.word.trim();
-                          if (!seen.has(key)) { seen.add(key); segs.push({ text: w.sentenceText || w.word, translation: w.sentenceTranslation || "", words: words.filter(x => (x.sentenceText?.trim() || x.word.trim()) === key) }); }
-                        });
-                        return segs;
-                      })()).map((seg: any, idx: number) => {
-                        const text = seg.text || seg.text;
+                      {/* Render transcript segments */}
+                      {(transcriptSegments.length > 0
+                        ? transcriptSegments
+                        : (() => {
+                            const seen = new Set<string>();
+                            const segs: {
+                              text: string;
+                              translation: string;
+                              words: Word[];
+                            }[] = [];
+                            words.forEach((w) => {
+                              const key =
+                                w.sentenceText?.trim() || w.word.trim();
+                              if (!seen.has(key)) {
+                                seen.add(key);
+                                segs.push({
+                                  text: w.sentenceText || w.word,
+                                  translation:
+                                    w.sentenceTranslation || "",
+                                  words: words.filter(
+                                    (x) =>
+                                      (x.sentenceText?.trim() ||
+                                        x.word.trim()) === key
+                                  ),
+                                });
+                              }
+                            });
+                            return segs;
+                          })()
+                      ).map((seg: any, idx: number) => {
+                        const text = seg.text || "";
                         const translation = seg.translation || "";
-                        const matchedWords = seg.words || getWordsForSentence(text);
+                        const matchedWords =
+                          seg.words || getWordsForSentence(text);
                         const hasWords = matchedWords.length > 0;
                         const isActive = activeIndex === idx;
-                        const parts = text.replace(/^>>\s*/, "").split(/(\s+)/);
+                        const parts = text
+                          .replace(/^>>\s*/, "")
+                          .split(/(\s+)/);
                         const start = seg.start;
+
                         return (
-                          <div key={idx}
-                            className={`flex items-start gap-1.5 px-3 py-1.5 border-b border-white/5 cursor-pointer hover:bg-white/5 transition-colors ${isActive ? "bg-purple-900/20 border-l-2 border-purple-500" : ""}`}
-                            onClick={() => { if (start !== undefined && playerRef.current?.seekTo) playerRef.current.seekTo(start, true); }}>
-                            <span className="text-[11px] text-gray-600 font-mono w-9 flex-none pt-0.5 select-none">{formatTime(start)}</span>
-                            <div className="flex-1 min-w-0">
-                              <div className="text-[14px] leading-relaxed">
-                                {hasWords ? parts.map((part: string, pi: number) => {
-                                  if (/^\s+$/.test(part)) return <span key={pi}>{part}</span>;
-                                  const clean = part.replace(/[.,!?;:'"()\-_—…\[\]{}«»]/g, "").trim().toLowerCase();
-                                  if (!clean) return <span key={pi} className="text-gray-500">{part}</span>;
-                                  const mw = matchedWords.find((w: Word) => {
-                                    const tc = w.word.replace(/\s*\(.*?\)\s*/g, "").toLowerCase();
-                                    const fc = w.sentenceForm?.toLowerCase();
-                                    return tc.includes(clean) || clean.includes(tc) || (fc && (fc.includes(clean) || clean.includes(fc)));
-                                  });
-                                  if (!mw) return <span key={pi} className="text-gray-500">{part}</span>;
-                                  return <button key={pi} onClick={(e) => { e.stopPropagation(); handleSelectWord(mw); }} className="text-purple-400 font-semibold underline decoration-purple-500/30 underline-offset-2 hover:text-purple-300">{part}</button>;
-                                }) : (
-                                  <span className="text-gray-500 italic">{text} <span className="text-[10px] bg-red-900/30 text-red-400 px-1.5 py-0.5 rounded-full uppercase font-semibold">Oluşturulmadı</span></span>
-                                )}
+                          <div
+                            key={idx}
+                            data-seg-idx={idx}
+                            className={`subtitle-line ${
+                              isActive ? "active" : ""
+                            } ${!hasWords ? "no-words" : ""}`}
+                            onClick={() => handleSegmentClick(start)}
+                          >
+                            {start !== undefined && (
+                              <span className="subtitle-time">
+                                {formatTime(start)}
+                              </span>
+                            )}
+                            <div className="subtitle-texts">
+                              <div className="subtitle-original">
+                                {hasWords
+                                  ? parts.map(
+                                      (part: string, pi: number) => {
+                                        if (/^\s+$/.test(part))
+                                          return (
+                                            <span key={pi}>
+                                              {part}
+                                            </span>
+                                          );
+                                        const clean = part
+                                          .replace(
+                                            /[.,!?;:'"()\-_—…\[\]{}«»]/g,
+                                            ""
+                                          )
+                                          .trim()
+                                          .toLowerCase();
+                                        if (!clean)
+                                          return (
+                                            <span
+                                              key={pi}
+                                              className="text-muted"
+                                            >
+                                              {part}
+                                            </span>
+                                          );
+                                        const mw = matchedWords.find(
+                                          (w: Word) => {
+                                            const tc = w.word
+                                              .replace(
+                                                /\s*\(.*?\)\s*/g,
+                                                ""
+                                              )
+                                              .toLowerCase();
+                                            const fc =
+                                              w.sentenceForm?.toLowerCase();
+                                            return (
+                                              tc.includes(clean) ||
+                                              clean.includes(tc) ||
+                                              (fc &&
+                                                (fc.includes(clean) ||
+                                                  clean.includes(fc)))
+                                            );
+                                          }
+                                        );
+                                        if (!mw)
+                                          return (
+                                            <span
+                                              key={pi}
+                                              className="text-muted"
+                                            >
+                                              {part}
+                                            </span>
+                                          );
+                                        return (
+                                          <button
+                                            key={pi}
+                                            className="word-link"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              handleSelectWord(mw);
+                                            }}
+                                          >
+                                            {part}
+                                          </button>
+                                        );
+                                      }
+                                    )
+                                  : text}
                               </div>
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <p className="text-[14px] text-gray-500 leading-relaxed">{hasWords && translation ? translation : ""}</p>
+                              {translation && (
+                                <div className="subtitle-translation">
+                                  {translation}
+                                </div>
+                              )}
+                              {!hasWords && (
+                                <span className="badge-not-created">
+                                  Oluşturulmadı
+                                </span>
+                              )}
                             </div>
                           </div>
                         );
@@ -309,27 +525,101 @@ export default function App() {
                     </div>
                   )}
                 </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+              )}
 
-      {screen === "word" && selectedWord && (
-        <div className="word-screen">
-          <div className="word-header">
-            <button className="back-btn" onClick={handleBackToLetters}><ChevronLeft size={24} /></button>
-            <h2>{selectedWord.word}</h2>
-          </div>
-          <div className="word-content">
-            {selectedWord.imageUrl && <img src={selectedWord.imageUrl} alt={selectedWord.word} className="word-image" />}
-            {selectedWord.textContent && <div className="word-text"><p>{selectedWord.textContent}</p></div>}
-            {(selectedWord.turkishMeaning || selectedWord.story) && (
-              <div className="word-meta">
-                {selectedWord.turkishMeaning && <div className="meta-item"><span className="meta-label">Anlamı</span><span className="meta-value">{selectedWord.turkishMeaning}</span></div>}
-                {selectedWord.story && <div className="meta-item"><span className="meta-label">Hikaye</span><span className="meta-value">{selectedWord.story}</span></div>}
-              </div>
-            )}
+              {/* WORDS TAB */}
+              {sideTab === "words" && (
+                <div className="words-content">
+                  {loadingWords ? (
+                    <div className="loading-state">
+                      <Loader2 size={24} className="spin" />
+                    </div>
+                  ) : uniqueWords.length === 0 ? (
+                    <div className="empty-state small">
+                      <p>Henüz sözcük eklenmemiş.</p>
+                    </div>
+                  ) : selectedWord ? (
+                    <div className="word-detail">
+                      <button
+                        className="word-detail-back"
+                        onClick={() => setSelectedWord(null)}
+                      >
+                        <ChevronLeft size={20} />
+                        <span>Sözcükler</span>
+                      </button>
+                      <div className="word-detail-content">
+                        <h2 className="word-detail-word">
+                          {selectedWord.word}
+                        </h2>
+                        {selectedWord.imageUrl && (
+                          <img
+                            src={selectedWord.imageUrl}
+                            alt={selectedWord.word}
+                            className="word-detail-image"
+                          />
+                        )}
+                        {selectedWord.turkishMeaning && (
+                          <div className="word-detail-section">
+                            <span className="detail-label">Anlamı</span>
+                            <p className="detail-value">
+                              {selectedWord.turkishMeaning}
+                            </p>
+                          </div>
+                        )}
+                        {selectedWord.keyword && (
+                          <div className="word-detail-section">
+                            <span className="detail-label">Anahtar Kelime</span>
+                            <p className="detail-value keyword">
+                              {selectedWord.keyword}
+                            </p>
+                          </div>
+                        )}
+                        {selectedWord.story && (
+                          <div className="word-detail-section">
+                            <span className="detail-label">Hikaye</span>
+                            <p className="detail-value story">
+                              {selectedWord.story}
+                            </p>
+                          </div>
+                        )}
+                        {selectedWord.sentenceText && (
+                          <div className="word-detail-section">
+                            <span className="detail-label">Cümle</span>
+                            <p className="detail-value sentence">
+                              {selectedWord.sentenceText}
+                            </p>
+                            {selectedWord.sentenceTranslation && (
+                              <p className="detail-value sentence-trans">
+                                {selectedWord.sentenceTranslation}
+                              </p>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="word-grid">
+                      {uniqueWords.map((w) => (
+                        <button
+                          key={w.id}
+                          className="word-card"
+                          onClick={() => handleSelectWord(w)}
+                        >
+                          <span className="word-card-text">
+                            {w.word.replace(/\s*\(.*?\)\s*/g, "")}
+                          </span>
+                          {w.turkishMeaning && (
+                            <span className="word-card-meaning">
+                              {w.turkishMeaning}
+                            </span>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
