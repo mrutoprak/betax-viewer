@@ -80,6 +80,7 @@ export default function App() {
   const [activeSentenceTrans, setActiveSentenceTrans] = useState<string>("");
   const [sentenceWords, setSentenceWords] = useState<Word[]>([]);
   const [sentenceWordIndex, setSentenceWordIndex] = useState<number>(0);
+  const [flippedCardIndex, setFlippedCardIndex] = useState<number>(-1);
 
   // Load videos from Firebase
   useEffect(() => {
@@ -741,48 +742,50 @@ export default function App() {
         </>
       )}
 
-      {/* 3. FLASHCARD OVERLAY */}
-      {showFlashcards && sentenceWords.length > 0 && (
-        <>
-          <div className="popup-overlay" />
-          <div className="word-popup">
-            <div className="popup-header-counter">
-              Kart — {sentenceWordIndex + 1} / {sentenceWords.length}
-            </div>
-            <div className="popup-content">
-              <h2 className="popup-word">
-                {sentenceWords[sentenceWordIndex].word.replace(/\s*\(.*?\)\s*/g, "")}
-              </h2>
-              {sentenceWords[sentenceWordIndex].imageUrl && (
-                <img
-                  src={sentenceWords[sentenceWordIndex].imageUrl}
-                  alt={sentenceWords[sentenceWordIndex].word}
-                  className="popup-image"
-                />
-              )}
-              {sentenceWords[sentenceWordIndex].turkishMeaning && (
-                <div className="popup-section">
-                  <span className="popup-label">Anlamı</span>
-                  <p className="popup-value">{sentenceWords[sentenceWordIndex].turkishMeaning}</p>
+      {/* 3. FLASHCARD OVERLAY — Studio ReviewModal gibi flip kart */}
+      {showFlashcards && sentenceWords.length > 0 && (() => {
+        const w = sentenceWords[sentenceWordIndex];
+        const isFlipped = flippedCardIndex === sentenceWordIndex;
+        return (
+          <>
+            <div className="popup-overlay" />
+            <div className="flip-card-wrapper">
+              <div className="flip-card-counter">Kart — {sentenceWordIndex + 1} / {sentenceWords.length}</div>
+              {/* 3D Flip Container */}
+              <div
+                className={`flip-card-inner ${isFlipped ? 'flipped' : ''}`}
+                onClick={() => setFlippedCardIndex(isFlipped ? -1 : sentenceWordIndex)}
+              >
+                {/* FRONT FACE */}
+                <div className="flip-card-face front">
+                  <div className="flip-card-image-area">
+                    {w.imageUrl ? (
+                      <img src={w.imageUrl} alt={w.word} className="flip-card-image" />
+                    ) : (
+                      <div className="flip-card-no-image">
+                        <p className="flip-card-prompt">{w.story?.substring(0, 80) || 'Kartı çevir'}</p>
+                      </div>
+                    )}
+                    <div className="flip-card-tap">DOKUN ÇEVİR</div>
+                  </div>
+                  <div className="flip-card-meaning-area">
+                    <h2 className="flip-card-meaning">{w.turkishMeaning || w.word.replace(/\s*\(.*?\)\s*/g, '')}</h2>
+                  </div>
                 </div>
-              )}
-              {sentenceWords[sentenceWordIndex].keyword && (
-                <div className="popup-section">
-                  <span className="popup-label">Anahtar Kelime</span>
-                  <p className="popup-value keyword">{sentenceWords[sentenceWordIndex].keyword}</p>
+                {/* BACK FACE */}
+                <div className="flip-card-face back">
+                  <div className="flip-card-back-content">
+                    <div className="flip-card-keyword-badge">{w.keyword || '—'}</div>
+                    <p className="flip-card-story">{w.story || ''}</p>
+                  </div>
                 </div>
-              )}
-              {sentenceWords[sentenceWordIndex].story && (
-                <div className="popup-section">
-                  <span className="popup-label">Hikaye</span>
-                  <p className="popup-value story">{sentenceWords[sentenceWordIndex].story}</p>
-                </div>
-              )}
-            </div>
-            <div className="popup-action">
+              </div>
+              {/* NEXT BUTTON */}
               <button
-                className="popup-btn"
-                onClick={() => {
+                className="flip-card-next-btn"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setFlippedCardIndex(-1);
                   if (sentenceWordIndex + 1 < sentenceWords.length) {
                     setSentenceWordIndex(sentenceWordIndex + 1);
                   } else {
@@ -793,12 +796,12 @@ export default function App() {
                   }
                 }}
               >
-                {sentenceWordIndex + 1 === sentenceWords.length ? "Tamam" : "Next"}
+                {sentenceWordIndex + 1 === sentenceWords.length ? 'Tamam' : 'Next'}
               </button>
             </div>
-          </div>
-        </>
-      )}
+          </>
+        );
+      })()}
     </div>
   );
 }
