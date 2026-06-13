@@ -172,29 +172,48 @@ export default function App() {
         .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
       setWords(allWords);
 
-      // Transcript'i doğrudan YouTube'dan çek (gerçek start süreleri için)
+      // Transcript: önce Firebase'deki publish edilmiş veriyi kullan, yoksa YouTube'dan çek
+      let transcriptLoaded = false;
       try {
         if (youtubeId) {
+          const ts = await getDoc(doc(db, "transcripts", youtubeId));
+          if (ts.exists() && ts.data().segments?.length > 0) {
+            const raw = ts.data().segments as any[];
+            // Firebase'deki segmentler { text, start, translation } formatında
+            if (raw.some(s => typeof s.start === 'number' && s.start >= 0)) {
+              setTranscriptSegments(raw as TranscriptSegment[]);
+              transcriptLoaded = true;
+            }
+          }
+        }
+        if (!transcriptLoaded) {
+          const old = await getDoc(doc(db, "videos", video.id, "transcript", "data"));
+          if (old.exists() && old.data().segments?.length > 0) {
+            const raw = old.data().segments as any[];
+            if (raw.some(s => typeof s.start === 'number' && s.start >= 0)) {
+              setTranscriptSegments(raw as TranscriptSegment[]);
+              transcriptLoaded = true;
+            }
+          }
+        }
+      } catch {}
+
+      // Firebase'de yoksa YouTube'dan çek
+      if (!transcriptLoaded && youtubeId) {
+        try {
           const ytSegments = await fetchYouTubeTranscript(youtubeId);
           if (ytSegments.length > 0) {
             setTranscriptSegments(ytSegments);
+            transcriptLoaded = true;
           }
+        } catch (e) {
+          console.error('YouTube transcript failed:', e);
         }
-      } catch {
-        // YouTube olmazsa Firebase'den yedekle
-        try {
-          if (youtubeId) {
-            const ts = await getDoc(doc(db, "transcripts", youtubeId));
-            if (ts.exists() && ts.data().segments?.length > 0) {
-              setTranscriptSegments(ensureStartValues(ts.data().segments as TranscriptSegment[]));
-            } else {
-              const old = await getDoc(doc(db, "videos", video.id, "transcript", "data"));
-              if (old.exists() && old.data().segments?.length > 0) {
-                setTranscriptSegments(ensureStartValues(old.data().segments as TranscriptSegment[]));
-              }
-            }
-          }
-        } catch {}
+      }
+
+      // Hiçbir yerde yoksa boş set et
+      if (!transcriptLoaded) {
+        setTranscriptSegments([]);
       }
 
       setScreen("player");
@@ -250,13 +269,6 @@ export default function App() {
       setActiveIndex(-1);
     };
   }, [screen, selectedVideo]);
-
-  // Segmentlerde start yoksa sequential (3sn aralıkla) değer ata
-  const ensureStartValues = useCallback((segs: TranscriptSegment[]): TranscriptSegment[] => {
-    const hasAnyStart = segs.some(s => s.start !== undefined && s.start !== null);
-    if (hasAnyStart) return segs;
-    return segs.map((s, i) => ({ ...s, start: i * 3 }));
-  }, []);
 
   // Poll current time via requestAnimationFrame (Studio gibi)
   useEffect(() => {
