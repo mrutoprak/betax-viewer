@@ -65,7 +65,8 @@ export default function App() {
   const [selectedWord, setSelectedWord] = useState<Word | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingWords, setLoadingWords] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
+  const currentTimeRef = useRef(0);
+  const [activeIndex, setActiveIndex] = useState(-1);
   const playerRef = useRef<any>(null);
   const pollRef = useRef<number>(0);
   const transcriptRef = useRef<HTMLDivElement>(null);
@@ -116,14 +117,16 @@ export default function App() {
         if (youtubeId) {
           const ts = await getDoc(doc(db, "transcripts", youtubeId));
           if (ts.exists() && ts.data().segments?.length > 0) {
-            setTranscriptSegments(ts.data().segments);
+            const rawSegs = ts.data().segments as TranscriptSegment[];
+            setTranscriptSegments(ensureStartValues(rawSegs));
             loaded = true;
           }
         }
         if (!loaded) {
           const old = await getDoc(doc(db, "videos", video.id, "transcript", "data"));
           if (old.exists() && old.data().segments?.length > 0) {
-            setTranscriptSegments(old.data().segments);
+            const rawSegs = old.data().segments as TranscriptSegment[];
+            setTranscriptSegments(ensureStartValues(rawSegs));
           }
         }
       } catch {}
@@ -177,41 +180,56 @@ export default function App() {
         playerRef.current.destroy();
         playerRef.current = null;
       }
-      setCurrentTime(0);
+      currentTimeRef.current = 0;
+      setActiveIndex(-1);
     };
   }, [screen, selectedVideo]);
 
-  // Poll current time for sync
+  // Segmentlerde start yoksa sequential (3sn aralıkla) değer ata
+  const ensureStartValues = useCallback((segs: TranscriptSegment[]): TranscriptSegment[] => {
+    const hasAnyStart = segs.some(s => s.start !== undefined && s.start !== null);
+    if (hasAnyStart) return segs;
+    return segs.map((s, i) => ({ ...s, start: i * 3 }));
+  }, []);
+
+  // Poll current time via requestAnimationFrame (Studio gibi)
   useEffect(() => {
-    if (screen !== "player") return;
+    if (screen !== "player" || transcriptSegments.length === 0) return;
+
     const poll = () => {
       if (playerRef.current?.getCurrentTime) {
         try {
-          setCurrentTime(playerRef.current.getCurrentTime());
+          const t = playerRef.current.getCurrentTime();
+          currentTimeRef.current = t;
+
+          // Aktif segment index'ini bul — Studio'daki mantığın aynısı
+          const idx = transcriptSegments.findIndex((s, i) => {
+            const segStart = s.start;
+            if (segStart === undefined || segStart === null) return false;
+            const end = i < transcriptSegments.length - 1
+              ? (transcriptSegments[i + 1].start ?? segStart + 5)
+              : segStart + 5;
+            return t >= segStart && t < end;
+          });
+
+          if (idx !== -1 && idx !== activeIndex) {
+            setActiveIndex(idx);
+          }
         } catch {}
       }
-      pollRef.current = window.setTimeout(poll, 100);
+      pollRef.current = requestAnimationFrame(poll);
     };
-    poll();
-    return () => {
-      if (pollRef.current) clearTimeout(pollRef.current);
-    };
-  }, [screen]);
+    pollRef.current = requestAnimationFrame(poll);
 
-  // Active segment index
-  const activeIndex = (() => {
-    if (!transcriptSegments.length || !currentTime) return -1;
-    let idx = -1;
-    for (let i = 0; i < transcriptSegments.length; i++) {
-      if (
-        transcriptSegments[i].start !== undefined &&
-        currentTime >= transcriptSegments[i].start!
-      ) {
-        idx = i;
-      }
-    }
-    return idx;
-  })();
+    return () => {
+      if (pollRef.current) cancelAnimationFrame(pollRef.current);
+    };
+  }, [screen, transcriptSegments, activeIndex]);
+
+  // Active segment sıfırlama — yeni video seçilince
+  useEffect(() => {
+    setActiveIndex(-1);
+  }, [selectedVideo]);
 
   // Auto-scroll transcript
   useEffect(() => {
