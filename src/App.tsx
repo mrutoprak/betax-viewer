@@ -47,69 +47,6 @@ function extractVideoId(url: string): string | null {
   return null;
 }
 
-// YouTube'dan gerçek transcript + start sürelerini çek
-async function fetchYouTubeTranscript(videoId: string): Promise<TranscriptSegment[]> {
-  // youtubetranscript.com API'sini kullan (CORS dostu, Vercel'de calisir)
-  const res = await fetch(`https://youtubetranscript.com/?v=${videoId}`);
-  if (!res.ok) throw new Error(`Transcript API: ${res.status}`);
-  const data = await res.json();
-  const raw = data.map((item: any) => ({
-    text: item.text || '',
-    start: Math.floor(item.offset || 0),
-    translation: '',
-  })).filter((item: any) => item.text.trim() !== '');
-  return mergeTranscriptSegments(raw);
-}
-
-// Studio'daki mergeTranscriptSegments'in aynısı — segmentleri cümle bazında birleştirir
-function cleanSubtitleText(text: string): string {
-  return text
-    .replace(/\[[^\]]+\]/g, '')
-    .replace(/\([^)]+\)/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function mergeTranscriptSegments(segments: { text: string; start: number; translation: string }[]): TranscriptSegment[] {
-  const cleanedSegments = segments.map(s => ({
-    ...s,
-    text: cleanSubtitleText(s.text)
-  })).filter(s => s.text.length > 0);
-
-  if (cleanedSegments.length === 0) return [];
-
-  const hasPunctuation = cleanedSegments.some(s => /[.!?~]/u.test(s.text));
-  const merged: TranscriptSegment[] = [];
-  let current = { ...cleanedSegments[0] };
-
-  for (let i = 1; i < cleanedSegments.length; i++) {
-    const next = cleanedSegments[i];
-    const timeGap = next.start - current.start;
-    let shouldMerge = false;
-
-    if (hasPunctuation) {
-      const trimmedCurrent = current.text.trim();
-      const endsWithPunc = /[.!?~"」』]$/u.test(trimmedCurrent);
-      if (!endsWithPunc && timeGap < 12) {
-        shouldMerge = true;
-      }
-    } else {
-      if (timeGap < 2.5) {
-        shouldMerge = true;
-      }
-    }
-
-    if (shouldMerge) {
-      current.text = `${current.text.trim()} ${next.text.trim()}`;
-    } else {
-      merged.push(current);
-      current = { ...next };
-    }
-  }
-  merged.push(current);
-  return merged;
-}
-
 function formatTime(seconds?: number): string {
   if (seconds === undefined) return "0:00";
   const m = Math.floor(seconds / 60);
@@ -187,47 +124,37 @@ export default function App() {
         .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
       setWords(allWords);
 
-      // Transcript: önce Firebase'deki publish edilmiş veriyi kullan, yoksa YouTube'dan çek
-      let transcriptLoaded = false;
+      // Transcript: sadece Firebase'deki publish edilmiş veriyi kullan
+      // Studio'dan yayınlanan transcript { text, start, translation } formatında gelir
       try {
         if (youtubeId) {
           const ts = await getDoc(doc(db, "transcripts", youtubeId));
           if (ts.exists() && ts.data().segments?.length > 0) {
             const raw = ts.data().segments as any[];
-            // Firebase'deki segmentler { text, start, translation } formatında
             if (raw.some(s => typeof s.start === 'number' && s.start >= 0)) {
               setTranscriptSegments(raw as TranscriptSegment[]);
-              transcriptLoaded = true;
+            } else {
+              // start değeri yoksa transcript kullanılamaz
+              setTranscriptSegments([]);
+            }
+          } else {
+            // Fallback: eski yapıdaki transcript
+            const old = await getDoc(doc(db, "videos", video.id, "transcript", "data"));
+            if (old.exists() && old.data().segments?.length > 0) {
+              const raw = old.data().segments as any[];
+              if (raw.some(s => typeof s.start === 'number' && s.start >= 0)) {
+                setTranscriptSegments(raw as TranscriptSegment[]);
+              } else {
+                setTranscriptSegments([]);
+              }
+            } else {
+              setTranscriptSegments([]);
             }
           }
+        } else {
+          setTranscriptSegments([]);
         }
-        if (!transcriptLoaded) {
-          const old = await getDoc(doc(db, "videos", video.id, "transcript", "data"));
-          if (old.exists() && old.data().segments?.length > 0) {
-            const raw = old.data().segments as any[];
-            if (raw.some(s => typeof s.start === 'number' && s.start >= 0)) {
-              setTranscriptSegments(raw as TranscriptSegment[]);
-              transcriptLoaded = true;
-            }
-          }
-        }
-      } catch {}
-
-      // Firebase'de yoksa YouTube'dan çek
-      if (!transcriptLoaded && youtubeId) {
-        try {
-          const ytSegments = await fetchYouTubeTranscript(youtubeId);
-          if (ytSegments.length > 0) {
-            setTranscriptSegments(ytSegments);
-            transcriptLoaded = true;
-          }
-        } catch (e) {
-          console.error('YouTube transcript failed:', e);
-        }
-      }
-
-      // Hiçbir yerde yoksa boş set et
-      if (!transcriptLoaded) {
+      } catch {
         setTranscriptSegments([]);
       }
 
