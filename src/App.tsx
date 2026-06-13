@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { collection, getDocs, doc, getDoc, deleteDoc } from "firebase/firestore";
 import { db } from "./firebase";
-import { Play, Loader2, BookOpen, ArrowLeft, RefreshCw } from "lucide-react";
+import { Play, Loader2, BookOpen, ArrowLeft, RefreshCw, Home, Layers } from "lucide-react";
 import "./App.css";
 
 declare var YT: any;
@@ -388,12 +388,12 @@ export default function App() {
 
   return (
     <div className="viewer-container">
-      {/* SPLASH SCREEN */}
+      {/* SPLASH SCREEN — Studio iOS Style */}
       {screen === "splash" && (
         <div className="splash">
           <div className="splash-header">
             <div className="splash-logo">
-              <BookOpen size={28} />
+              <div className="logo-icon">ع</div>
               <h1>Betax</h1>
             </div>
             <p className="splash-subtitle">Bir video seçerek kelime öğrenmeye başla</p>
@@ -667,7 +667,7 @@ export default function App() {
         </div>
       )}
 
-      {/* 1. HOŞGELDİN OVERLAY'İ */}
+      {/* 1. HOŞGELDİN OVERLAY — iOS Light Style */}
       {showWelcome && (
         <>
           <div className="popup-overlay" />
