@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { collection, getDocs, doc, getDoc, deleteDoc } from "firebase/firestore";
 import { db } from "./firebase";
-import { Play, ChevronLeft, Loader2, Languages, BookOpen, ArrowLeft, Bookmark } from "lucide-react";
+import { Play, ChevronLeft, Loader2, Languages, BookOpen, ArrowLeft, Bookmark, RefreshCw } from "lucide-react";
 import "./App.css";
 
 declare var YT: any;
@@ -299,6 +299,57 @@ export default function App() {
     }
   }, []);
 
+  // Firebase'den taze veri çek (Studio'dan publish sonrası)
+  const handleRefresh = useCallback(async () => {
+    if (!selectedVideo) return;
+    const youtubeId = extractVideoId(selectedVideo.videoUrl || "");
+    setLoadingWords(true);
+    try {
+      // Kelimeleri yeniden çek
+      const q = collection(db, "words");
+      const snap = await getDocs(q);
+      const allWords = snap.docs
+        .map((d) => ({ id: d.id, ...d.data() } as Word))
+        .filter((w) => {
+          const wid = w.id.startsWith(youtubeId) || w.videoId === youtubeId || w.id.startsWith(selectedVideo.id) || (w as any).folderId === selectedVideo.id;
+          return wid;
+        })
+        .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+      setWords(allWords);
+
+      // Transcript'i yeniden çek
+      let transcriptLoaded = false;
+      if (youtubeId) {
+        const ts = await getDoc(doc(db, "transcripts", youtubeId));
+        if (ts.exists() && ts.data().segments?.length > 0) {
+          const raw = ts.data().segments as any[];
+          if (raw.some(s => typeof s.start === 'number' && s.start >= 0)) {
+            setTranscriptSegments(raw as TranscriptSegment[]);
+            transcriptLoaded = true;
+          }
+        }
+      }
+      if (!transcriptLoaded) {
+        const old = await getDoc(doc(db, "videos", selectedVideo.id, "transcript", "data"));
+        if (old.exists() && old.data().segments?.length > 0) {
+          const raw = old.data().segments as any[];
+          if (raw.some(s => typeof s.start === 'number' && s.start >= 0)) {
+            setTranscriptSegments(raw as TranscriptSegment[]);
+            transcriptLoaded = true;
+          }
+        }
+      }
+      if (!transcriptLoaded) {
+        setTranscriptSegments([]);
+      }
+      setActiveIndex(-1);
+    } catch (e) {
+      console.error('Refresh error:', e);
+    } finally {
+      setLoadingWords(false);
+    }
+  }, [selectedVideo]);
+
   // Get unique words for the words tab
   const uniqueWords = (() => {
     const seen = new Set<string>();
@@ -379,6 +430,9 @@ export default function App() {
             <div className="topbar-url">
               {selectedVideo.videoUrl || selectedVideo.name || ""}
             </div>
+            <button onClick={handleRefresh} className="topbar-refresh" title="Yenile">
+              <RefreshCw size={18} />
+            </button>
           </div>
 
           {/* Main content */}

@@ -231,6 +231,27 @@
   background: rgba(255,255,255,0.1);
 }
 
+.topbar-refresh {
+  background: none;
+  border: none;
+  color: #aaa;
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 50%;
+  transition: all 0.15s;
+  display: flex;
+  margin-left: 8px;
+}
+
+.topbar-refresh:hover {
+  color: #fff;
+  background: rgba(255,255,255,0.1);
+}
+
+.topbar-refresh:active {
+  transform: rotate(180deg);
+}
+
 .topbar-url {
   flex: 1;
   background: #000;
