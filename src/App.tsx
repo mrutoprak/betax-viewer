@@ -13,7 +13,6 @@ declare var YT: any;
 interface Word {
   id: string;
   word: string;
-  pronunciation?: string;
   turkishMeaning?: string;
   keyword?: string;
   story?: string;
@@ -378,13 +377,10 @@ export default function App() {
     }
   }, []);
 
+  // Studio ile aynı mantık: Google Cloud TTS, dil otomatik algılanır
   const playTTS = useCallback(async (wordText: string) => {
-    // Temizlik: parantez içi okunuşları ve noktalama işaretlerini kaldır
-    const cleanWord = wordText.replace(/\s*\(.*?\)\s*/g, "").replace(/[.,!?;:'"()\-_—…\[\]{}«»]/g, '').trim();
-    
-    // Google Cloud TTS API ile yüksek kaliteli ses (dil otomatik algılanır)
-    const targetLangName = detectTargetLang(cleanWord);
-    const audioDataUrl = await generateAudio(cleanWord, targetLangName);
+    const targetLangName = detectTargetLang(wordText);
+    const audioDataUrl = await generateAudio(wordText, targetLangName);
     if (audioDataUrl) {
       const audio = new Audio(audioDataUrl);
       await audio.play();
@@ -837,7 +833,7 @@ function ViewingCardModal({ card, onClose, onPlayPronunciation }: ViewingCardMod
   const handlePlayAudio = (e: React.MouseEvent) => {
     e.stopPropagation();
     setIsPlaying(true);
-    onPlayPronunciation(card.pronunciation || card.word);
+    onPlayPronunciation(card.word);
     setTimeout(() => setIsPlaying(false), 1500);
   };
 
