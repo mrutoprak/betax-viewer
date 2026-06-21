@@ -13,6 +13,7 @@ declare var YT: any;
 interface Word {
   id: string;
   word: string;
+  pronunciation?: string;
   turkishMeaning?: string;
   keyword?: string;
   story?: string;
@@ -836,7 +837,7 @@ function ViewingCardModal({ card, onClose, onPlayPronunciation }: ViewingCardMod
   const handlePlayAudio = (e: React.MouseEvent) => {
     e.stopPropagation();
     setIsPlaying(true);
-    onPlayPronunciation(card.word);
+    onPlayPronunciation(card.pronunciation || card.word);
     setTimeout(() => setIsPlaying(false), 1500);
   };
 
