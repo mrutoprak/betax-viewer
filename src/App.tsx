@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { collection, getDocs, doc, getDoc, deleteDoc } from "firebase/firestore";
 import { db } from "./firebase";
 import { 
@@ -136,7 +136,7 @@ function getWordPlaybackTimes(
   };
 }
 
-type SideTab = "subtitles" | "levels";
+type SideTab = "subtitles" | "levels" | "levels2";
 
 export default function App() {
   const [videos, setVideos] = useState<Video[]>([]);
@@ -162,6 +162,23 @@ export default function App() {
     return val !== 'false';
   });
 
+  // SRS sabitleri
+  const SRS_INTERVALS = [5000, 25000, 120000, 600000, 3600000, 18000000, 86400000];
+  const SRS_LABELS = ["5s", "25s", "2m", "10m", "1h", "5h", "1d"];
+
+  // Seviyeler 2 state'leri
+  const [activatedSegments, setActivatedSegments] = useState<Set<number>>(new Set());
+  const [pendingActivateSegments, setPendingActivateSegments] = useState<Set<number>>(new Set());
+  const [level2SRS, setLevel2SRS] = useState<Record<string, { intervalIndex: number; nextReviewTime: number }>>({});
+  const [elapsedPlayTime, setElapsedPlayTime] = useState(0);
+  const [expandedLevel2Segments, setExpandedLevel2Segments] = useState<Set<number>>(new Set());
+  const [reviewingLevelSegment, setReviewingLevelSegment] = useState<number | null>(null);
+  const [reviewingCardIdx, setReviewingCardIdx] = useState(0);
+  const [showReviewOverlay, setShowReviewOverlay] = useState(false);
+  const [pendingReviewCards, setPendingReviewCards] = useState<Word[] | null>(null);
+  const [pendingReviewSegmentIdx, setPendingReviewSegmentIdx] = useState<number | null>(null);
+  const [dueCheckTrigger, setDueCheckTrigger] = useState(0);
+
 
 
   const playerRef = useRef<any>(null);
@@ -170,6 +187,119 @@ export default function App() {
   const isWordPlayingRef = useRef<boolean>(false);
   const wordPlayingSegmentIdxRef = useRef<number>(-1);
   const transcriptRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (playerRef.current && typeof playerRef.current.getPlayerState === 'function') {
+        try {
+          const state = playerRef.current.getPlayerState();
+          if (state === 1) {
+            setElapsedPlayTime(prev => prev + 1000);
+          }
+        } catch {}
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const formatTimeLeft = (targetTime: number) => {
+    const diff = targetTime - elapsedPlayTime;
+    if (diff <= 0) return null;
+    const totalSeconds = Math.floor(diff / 1000);
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    if (hours > 0) return `${hours}h ${minutes.toString().padStart(2, '0')}m`;
+    if (minutes > 0) return `${minutes}m ${seconds.toString().padStart(2, '0')}s`;
+    return `${seconds}s`;
+  };
+
+  const getSegmentCards = useCallback((segIdx: number): Word[] => {
+    const seg = transcriptSegments[segIdx];
+    if (!seg) return [];
+    return (words || []).filter(w =>
+      w.sentenceText && w.sentenceText.toLowerCase().trim() === seg.text.toLowerCase().trim()
+    );
+  }, [transcriptSegments, words]);
+
+  const handleActivateSegment = useCallback((segIdx: number) => {
+    const seg = transcriptSegments[segIdx];
+    if (!seg) return;
+    const segCards = getSegmentCards(segIdx);
+    if (segCards.length === 0) return;
+    
+    lastDueCheckRef.current = 0;
+    
+    setLevel2SRS(prev => {
+      const next = { ...prev };
+      for (const card of segCards) {
+        if (!next[card.id]) {
+          next[card.id] = { intervalIndex: 0, nextReviewTime: elapsedPlayTime + SRS_INTERVALS[0] };
+        }
+      }
+      return next;
+    });
+    
+    setActivatedSegments(prev => {
+      const next = new Set(prev);
+      next.add(segIdx);
+      return next;
+    });
+    
+    setDueCheckTrigger(n => n + 1);
+  }, [transcriptSegments, words, elapsedPlayTime, getSegmentCards]);
+
+  const lastDueCheckRef = useRef(0);
+  const [pendingActivateMsg, setPendingActivateMsg] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (screen !== "player" || !selectedVideo) return;
+    
+    const dueEntries = (Object.entries(level2SRS) as [string, { intervalIndex: number; nextReviewTime: number }][]).filter(([_, srs]) => elapsedPlayTime >= srs.nextReviewTime);
+    if (dueEntries.length === 0) return;
+    
+    const isPlaying = playerRef.current && typeof playerRef.current.getPlayerState === 'function'
+      && (() => { try { return playerRef.current.getPlayerState() === 1; } catch { return false; } })();
+    if (!isPlaying) return;
+    
+    if (pendingReviewCards && pendingReviewCards.length > 0) return;
+    
+    const dueCardIds = new Set(dueEntries.map(([id]) => id));
+    const dueSegments = [...activatedSegments].filter(idx => {
+      const segCards = getSegmentCards(idx);
+      return segCards.some(c => dueCardIds.has(c.id));
+    });
+    if (dueSegments.length === 0) return;
+    
+    try {
+      if (playerRef.current && typeof playerRef.current.pauseVideo === 'function') {
+        playerRef.current.pauseVideo();
+      }
+    } catch {}
+    
+    const segIdx = dueSegments[0];
+    const segCards = getSegmentCards(segIdx);
+    setPendingReviewCards(segCards);
+    setPendingReviewSegmentIdx(segIdx);
+    setShowReviewOverlay(true);
+  }, [elapsedPlayTime, level2SRS, activatedSegments, getSegmentCards, screen, selectedVideo, pendingReviewCards]);
+
+  const reviewingLevelCards = useMemo(() => {
+    if (reviewingLevelSegment === null || !transcriptSegments[reviewingLevelSegment]) return [];
+    const seg = transcriptSegments[reviewingLevelSegment];
+    return (words || []).filter(w =>
+      w.sentenceText && w.sentenceText.toLowerCase().trim() === seg.text.toLowerCase().trim()
+    );
+  }, [reviewingLevelSegment, transcriptSegments, words]);
+
+  const handleLevelReviewNext = useCallback(() => {
+    if (reviewingCardIdx < reviewingLevelCards.length - 1) {
+      setReviewingCardIdx(prev => prev + 1);
+    } else {
+      setReviewingLevelSegment(null);
+      setReviewingCardIdx(0);
+    }
+  }, [reviewingCardIdx, reviewingLevelCards.length]);
 
   // Load videos from Firebase
   useEffect(() => {
@@ -202,6 +332,15 @@ export default function App() {
 
   // Handle video selection
   const handleSelectVideo = useCallback(async (video: Video) => {
+    setActivatedSegments(new Set());
+    setPendingActivateSegments(new Set());
+    setLevel2SRS({});
+    setElapsedPlayTime(0);
+    setExpandedLevel2Segments(new Set());
+    setReviewingLevelSegment(null);
+    setShowReviewOverlay(false);
+    setPendingReviewCards(null);
+
     setSelectedVideo(video);
     setLoadingWords(true);
     setSideTab("subtitles");
@@ -530,6 +669,7 @@ export default function App() {
                 {[
                   { key: 'subtitles' as SideTab, label: 'Altyazılar', icon: <Languages size={14} /> },
                   { key: 'levels' as SideTab, label: 'Seviyeler', icon: <Search size={14} /> },
+                  { key: 'levels2' as SideTab, label: 'Seviyeler 2', icon: <Search size={14} /> }
                 ].map(tab => (
                   <button
                     key={tab.key}
@@ -706,8 +846,43 @@ export default function App() {
                                           {wordCount} kart
                                         </span>
                                       )}
+                                      
+                                      {segWordsSorted.length > 0 && (
+                                        <button
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            if (activatedSegments.has(idx)) return;
+                                            if (pendingActivateSegments.has(idx)) {
+                                              setPendingActivateSegments(prev => {
+                                                const next = new Set(prev);
+                                                next.delete(idx);
+                                                return next;
+                                              });
+                                              handleActivateSegment(idx);
+                                            } else {
+                                              setPendingActivateSegments(prev => new Set(prev).add(idx));
+                                            }
+                                          }}
+                                          className={`text-[11px] font-semibold px-2.5 py-1 rounded-md transition-all flex items-center gap-1 shrink-0 ${
+                                            activatedSegments.has(idx)
+                                              ? 'text-emerald-600 bg-emerald-50 border border-emerald-200'
+                                              : pendingActivateSegments.has(idx)
+                                                ? 'text-amber-600 bg-amber-50 border border-amber-200 animate-pulse'
+                                                : 'text-gray-500 bg-gray-50 hover:bg-blue-50 border border-gray-200 hover:border-blue-200 hover:text-[#007AFF]'
+                                          }`}
+                                        >
+                                          <Play size={10} />
+                                          <span>{activatedSegments.has(idx) ? 'Başlatıldı' : pendingActivateSegments.has(idx) ? "Başlat'a Hazırım" : 'Başlat'}</span>
+                                        </button>
+                                      )}
                                     </div>
                                   </div>
+                                  
+                                  {pendingActivateSegments.has(idx) && (
+                                    <div className="mt-2 p-2 bg-amber-50 border border-amber-200 rounded-lg">
+                                      <p className="text-[11px] text-amber-700 font-semibold text-center">📖 Kartları inceleyip hazır olduğunda tekrar "Başlat'a Hazırım"a bas.</p>
+                                    </div>
+                                  )}
                                   
                                   {/* Text & Translation */}
                                   {seg.translation ? (
@@ -797,11 +972,180 @@ export default function App() {
                     </div>
                   </div>
                 )}
+
+                {/* === TAB 3: SEVİYELER 2 === */}
+                {sideTab === 'levels2' && (
+                  <div className="h-full flex flex-col">
+                    <div className="flex-none px-3 py-2 border-b border-gray-200 bg-gray-100/50 flex justify-between items-center">
+                      <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">AKTİF CÜMLELER ({activatedSegments.size})</span>
+                      {activatedSegments.size > 0 && (
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] text-gray-400">{Object.keys(level2SRS).length} kart başlatıldı</span>
+                          <button
+                            onClick={() => { if (window.confirm('Tüm başlatılmış cümleleri sıfırlamak istiyor musunuz?')) { setLevel2SRS({}); setActivatedSegments(new Set()); } }}
+                            className="text-[11px] font-bold text-red-500 hover:text-red-600 hover:bg-red-50 px-2.5 py-1 rounded transition-colors"
+                          >Sıfırla</button>
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex-grow overflow-y-auto scroll-smooth px-3 py-3 space-y-3">
+                      {activatedSegments.size === 0 ? (
+                        <div className="flex flex-col items-center justify-center h-full text-gray-400 pb-16">
+                          <Play size={40} className="text-gray-300 mb-3" />
+                          <p className="text-sm font-medium text-gray-500">Henüz başlatılmış cümle yok</p>
+                          <p className="text-xs text-gray-400 mt-1">Seviyeler tabında her cümle için "Başlat" butonuna tıkla</p>
+                        </div>
+                      ) : (
+                        [...activatedSegments].sort((a, b) => a - b).map(idx => {
+                          const seg = transcriptSegments[idx];
+                          if (!seg) return null;
+                          const isExpanded = expandedLevel2Segments.has(idx);
+                          const isActive = idx === currentSegmentIdx;
+                          let sentenceCards = (words || []).filter(w => w.sentenceText && w.sentenceText.toLowerCase().trim() === seg.text.toLowerCase().trim());
+                          // kelime sırasına göre sırala
+                          const segWordList = seg.text.split(/\s+/).map(w => w.replace(/[.,!?;:'"()\-_—…\[\]{}«»]/g, '').toLowerCase().trim()).filter(w => w.length > 0);
+                          sentenceCards = [...sentenceCards].sort((a, b) => {
+                            const wordA = (a.sentenceForm || a.word).replace(/\s*\([^)]+\)/g, '').replace(/\s*\[[^\]]+\]/g, '').replace(/[.,!?;:'"()\-_—…\[\]{}«»]/g, '').toLowerCase().trim();
+                            const wordB = (b.sentenceForm || b.word).replace(/\s*\([^)]+\)/g, '').replace(/\s*\[[^\]]+\]/g, '').replace(/[.,!?;:'"()\-_—…\[\]{}«»]/g, '').toLowerCase().trim();
+                            const idxA = segWordList.findIndex(w => w === wordA || w.includes(wordA) || wordA.includes(w));
+                            const idxB = segWordList.findIndex(w => w === wordB || w.includes(wordB) || wordB.includes(w));
+                            return (idxA === -1 ? 999 : idxA) - (idxB === -1 ? 999 : idxB);
+                          });
+                          const hasReadyReview = sentenceCards.some(c => {
+                            const srs = level2SRS[c.id];
+                            return srs && elapsedPlayTime >= srs.nextReviewTime;
+                          });
+                          const isBlurred = hasReadyReview && !isExpanded;
+                          return (
+                            <div key={idx}
+                              onClick={() => { setExpandedLevel2Segments(prev => { const next = new Set(prev); if (next.has(idx)) next.delete(idx); else next.add(idx); return next; }); }}
+                              className={`w-full rounded-xl bg-white border shadow-sm transition-all duration-200 cursor-pointer overflow-hidden ${isActive ? 'border-emerald-300 ring-2 ring-emerald-100' : 'border-gray-200/60 hover:border-gray-300'}`}
+                            >
+                              <div className="p-4">
+                                <div className="flex items-start gap-3">
+                                  <div className="text-[28px] font-extrabold text-emerald-500 leading-none shrink-0 w-8 text-center pt-0.5">{idx + 1}</div>
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex justify-between items-center mb-1.5">
+                                      <div className="flex items-center gap-2">
+                                        <span className="text-[11px] font-mono text-gray-400">{formatTime(seg.start)}</span>
+                                        <span className="text-[10px] text-gray-400 font-semibold bg-gray-100 px-1.5 py-0.5 rounded">{sentenceCards.length} kart</span>
+                                        {hasReadyReview && <span className="text-[10px] font-bold text-red-500 bg-red-50 px-1.5 py-0.5 rounded-full">GÖZDEN GEÇİR</span>}
+                                      </div>
+                                      <button onClick={(e) => { e.stopPropagation(); setReviewingLevelSegment(idx); }} className="text-[11px] font-semibold text-emerald-600 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2.5 py-1 rounded-md transition-all flex items-center gap-1 shrink-0">
+                                        <Play size={11} fill="currentColor" /><span>İncele</span>
+                                      </button>
+                                    </div>
+                                    <div className={`transition-all duration-500 ${isBlurred ? 'blur-sm select-none' : ''}`}>
+                                      {seg.translation ? (
+                                        <>
+                                          <p className="text-[16px] font-semibold leading-relaxed text-gray-900">{cleanTextOnTheFly(seg.translation)}</p>
+                                          <p className="text-[12px] text-gray-500 mt-1 leading-relaxed border-t border-gray-100 pt-1">{cleanTextOnTheFly(seg.text)}</p>
+                                        </>
+                                      ) : (
+                                        <p className="text-[14px] font-medium leading-relaxed text-gray-900">{cleanTextOnTheFly(seg.text)}</p>
+                                      )}
+                                    </div>
+                                    {isBlurred && (
+                                      <div className="mt-2 p-2 bg-amber-50 border border-amber-200 rounded-lg animate-pulse">
+                                        <p className="text-[11px] text-amber-700 font-semibold text-center">💡 Önce hatırlamaya çalış, sonra tıkla</p>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                              {isExpanded && (
+                                <div className="border-t border-gray-100 bg-gray-50/70 px-4 py-3 space-y-2">
+                                  {sentenceCards.length === 0 ? (
+                                    <p className="text-center text-gray-400 text-xs py-2 italic">Bu cümlede kart yok</p>
+                                  ) : (
+                                    sentenceCards.map(card => (
+                                      <div key={card.id}
+                                        onClick={(e) => { e.stopPropagation(); setReviewingCardIdx(sentenceCards.findIndex(c => c.id === card.id)); setReviewingLevelSegment(idx); }}
+                                        className="flex items-center justify-between bg-white rounded-lg px-3 py-2.5 border border-gray-200 hover:border-emerald-200 hover:shadow-sm transition-all cursor-pointer active:scale-[0.99]"
+                                      >
+                                        <div className="flex-1 min-w-0">
+                                          <p className="text-[14px] font-semibold text-gray-900">{card.turkishMeaning}</p>
+                                        </div>
+                                        {(() => { const s = level2SRS[card.id]; if (!s) return null; const tl = formatTimeLeft(s.nextReviewTime); const lb = SRS_LABELS[s.intervalIndex] || ''; if (!tl) return <span className="text-[10px] font-bold text-red-500 bg-red-50 px-2 py-0.5 rounded-full ml-2 shrink-0">Due</span>; return <span className="text-[10px] font-medium text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full ml-2 shrink-0 flex items-center gap-1"><span className="text-emerald-500 font-bold">{lb}</span><span>·</span><span>{tl}</span></span>; })()}
+                                      </div>
+                                    ))
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
 
             </div>
 
           </div>
+
+          {showReviewOverlay && pendingReviewCards && pendingReviewCards.length > 0 && (
+            <div className="absolute inset-0 z-50 flex items-center justify-center" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0 }}>
+              <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" />
+              <div className="relative w-full max-w-sm mx-4 bg-white rounded-2xl shadow-2xl overflow-hidden">
+                <div className="bg-amber-50 px-5 py-4 border-b border-amber-100">
+                  <h3 className="text-[17px] font-bold text-amber-800">⏰ Hatırlama Zamanı!</h3>
+                  <p className="text-[12px] text-amber-600 mt-1">Bu cümledeki kelimeleri hatırlıyor musun?</p>
+                </div>
+                <div className="px-4 py-3 space-y-2 max-h-[50vh] overflow-y-auto">
+                  {pendingReviewCards.map((card, i) => (
+                    <div key={card.id}
+                      onClick={() => { const ci = pendingReviewCards.findIndex(c => c.id === card.id); setReviewingCardIdx(ci); setReviewingLevelSegment(pendingReviewSegmentIdx); setShowReviewOverlay(false); setPendingReviewCards(null); setPendingReviewSegmentIdx(null); }}
+                      className="flex items-center justify-between bg-gray-50 rounded-xl px-4 py-3 border border-gray-200 hover:border-amber-200 hover:shadow-sm transition-all cursor-pointer active:scale-[0.99]"
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className="text-[13px] font-bold text-amber-400 w-5">{i + 1}</span>
+                        <p className="text-[15px] font-semibold text-gray-900">{card.turkishMeaning}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="px-4 py-3 border-t border-gray-100 bg-gray-50 flex gap-2">
+                  <button onClick={() => { setShowReviewOverlay(false); setPendingReviewCards(null); setPendingReviewSegmentIdx(null); }} className="flex-1 py-2.5 text-[13px] font-semibold text-gray-500 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-all active:scale-95">Sonra Hatırlat</button>
+                  <button onClick={() => { setReviewingCardIdx(0); setReviewingLevelSegment(pendingReviewSegmentIdx); setShowReviewOverlay(false); setPendingReviewCards(null); setPendingReviewSegmentIdx(null); }} className="flex-1 py-2.5 text-[13px] font-semibold text-white bg-emerald-500 rounded-xl hover:bg-emerald-600 transition-all active:scale-95">Hepsi Burada İncele</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {reviewingLevelSegment !== null && reviewingLevelCards.length > 0 && reviewingLevelCards[reviewingCardIdx] && (
+            (() => {
+              const currentCard = reviewingLevelCards[reviewingCardIdx];
+              const srsEntry = level2SRS[currentCard.id];
+              const inLevel2SRS = !!srsEntry;
+              return (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ perspective: '1000px' }}>
+                  <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" onClick={() => { setReviewingLevelSegment(null); setReviewingCardIdx(0); }} />
+                  <div className="relative w-full max-w-[340px] aspect-[3/4] max-h-[85vh]">
+                    <div className="absolute -top-14 right-0 z-50">
+                      <button onClick={() => { setReviewingLevelSegment(null); setReviewingCardIdx(0); }} className="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition-all active:scale-95"><X size={20} /></button>
+                    </div>
+                    <div className="relative w-full h-full cursor-pointer" style={{ transformStyle: 'preserve-3d', transition: 'transform 0.55s ease-in-out', transform: 'rotateY(0deg)', willChange: 'transform' }}>
+                      <div className="absolute inset-0 bg-white rounded-[32px] overflow-hidden shadow-2xl flex flex-col items-center justify-center px-6" style={{ backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden' }}>
+                        <h2 className="text-2xl font-bold text-gray-900 text-center leading-snug break-words mb-6">{currentCard.turkishMeaning}</h2>
+                        {inLevel2SRS && (
+                          <button onClick={(e) => {
+                            e.stopPropagation();
+                            const nextIndex = Math.min((srsEntry?.intervalIndex ?? 0) + 1, SRS_INTERVALS.length - 1);
+                            setLevel2SRS(prev => ({ ...prev, [currentCard.id]: { intervalIndex: nextIndex, nextReviewTime: elapsedPlayTime + SRS_INTERVALS[nextIndex] } }));
+                            handleLevelReviewNext();
+                          }} className="bg-black text-white rounded-2xl px-8 py-3 text-[15px] font-bold transition-all active:scale-[0.98] shadow-md hover:bg-gray-900 flex items-center gap-2">
+                            {reviewingCardIdx < reviewingLevelCards.length - 1 ? <><span>Sonraki</span><Check size={18} /></> : <><span>Bitir</span><Check size={18} /></>}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()
+          )}
 
         </div>
       )}
