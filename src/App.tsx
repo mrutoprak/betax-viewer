@@ -178,6 +178,8 @@ export default function App() {
   const [pendingReviewCards, setPendingReviewCards] = useState<Word[] | null>(null);
   const [pendingReviewSegmentIdx, setPendingReviewSegmentIdx] = useState<number | null>(null);
   const [dueCheckTrigger, setDueCheckTrigger] = useState(0);
+  const [reviewShowImage, setReviewShowImage] = useState(false);
+  const [reviewIsFlipped, setReviewIsFlipped] = useState(false);
 
 
 
@@ -1121,23 +1123,71 @@ export default function App() {
               const inLevel2SRS = !!srsEntry;
               return (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ perspective: '1000px' }}>
-                  <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" onClick={() => { setReviewingLevelSegment(null); setReviewingCardIdx(0); }} />
+                  <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" onClick={() => { setReviewingLevelSegment(null); setReviewingCardIdx(0); setReviewShowImage(false); setReviewIsFlipped(false); }} />
                   <div className="relative w-full max-w-[340px] aspect-[3/4] max-h-[85vh]">
                     <div className="absolute -top-14 right-0 z-50">
-                      <button onClick={() => { setReviewingLevelSegment(null); setReviewingCardIdx(0); }} className="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition-all active:scale-95"><X size={20} /></button>
+                      <button onClick={() => { setReviewingLevelSegment(null); setReviewingCardIdx(0); setReviewShowImage(false); setReviewIsFlipped(false); }} className="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition-all active:scale-95"><X size={20} /></button>
                     </div>
-                    <div className="relative w-full h-full cursor-pointer" style={{ transformStyle: 'preserve-3d', transition: 'transform 0.55s ease-in-out', transform: 'rotateY(0deg)', willChange: 'transform' }}>
-                      <div className="absolute inset-0 bg-white rounded-[32px] overflow-hidden shadow-2xl flex flex-col items-center justify-center px-6" style={{ backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden' }}>
-                        <h2 className="text-2xl font-bold text-gray-900 text-center leading-snug break-words mb-6">{currentCard.turkishMeaning}</h2>
-                        {inLevel2SRS && (
-                          <button onClick={(e) => {
-                            e.stopPropagation();
-                            const nextIndex = Math.min((srsEntry?.intervalIndex ?? 0) + 1, SRS_INTERVALS.length - 1);
-                            setLevel2SRS(prev => ({ ...prev, [currentCard.id]: { intervalIndex: nextIndex, nextReviewTime: elapsedPlayTime + SRS_INTERVALS[nextIndex] } }));
-                            handleLevelReviewNext();
-                          }} className="bg-black text-white rounded-2xl px-8 py-3 text-[15px] font-bold transition-all active:scale-[0.98] shadow-md hover:bg-gray-900 flex items-center gap-2">
-                            {reviewingCardIdx < reviewingLevelCards.length - 1 ? <><span>Sonraki</span><Check size={18} /></> : <><span>Bitir</span><Check size={18} /></>}
-                          </button>
+                    <div className="relative w-full h-full cursor-pointer"
+                      style={{ transformStyle: 'preserve-3d', transition: 'transform 0.55s ease-in-out', transform: reviewIsFlipped ? 'rotateY(180deg)' : 'rotateY(0deg)', willChange: 'transform' }}
+                      onClick={() => { if (reviewShowImage) setReviewIsFlipped(prev => !prev); }}
+                    >
+                      {/* FRONT FACE */}
+                      <div className="absolute inset-0 bg-white rounded-[32px] overflow-hidden shadow-2xl flex flex-col" style={{ backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden' }}>
+                        {!reviewShowImage ? (
+                          <>
+                            <div className="flex-1 flex flex-col items-center justify-center px-6 bg-gradient-to-b from-gray-50 to-white">
+                              <h2 className="text-2xl font-bold text-gray-900 text-center leading-snug break-words">{currentCard.turkishMeaning}</h2>
+                            </div>
+                            <div className="flex-none px-4 py-4 flex justify-center">
+                              {currentCard.imageUrl && (
+                                <button onClick={(e) => { e.stopPropagation(); setReviewShowImage(true); }} className="bg-white border border-gray-200 rounded-full px-5 py-2 text-[12px] font-semibold text-gray-600 shadow-sm hover:bg-gray-50 transition-all active:scale-95 flex items-center gap-1.5">
+                                  🖼 Resmi Göster
+                                </button>
+                              )}
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <div className="relative flex-1 w-full bg-gray-100 min-h-0">
+                              {currentCard.imageUrl ? (
+                                <img src={currentCard.imageUrl} alt="Mnemonic" className="w-full h-full object-cover" loading="eager" />
+                              ) : (
+                                <div className="w-full h-full flex items-center justify-center text-gray-400 text-sm">Resim yok</div>
+                              )}
+                            </div>
+                          </>
+                        )}
+                        {/* Turkish meaning + Next butonları */}
+                        <div className="flex-none px-4 py-3 bg-white border-t border-gray-100">
+                          <h2 className="text-xl font-semibold text-gray-900 text-center leading-snug mb-2">{currentCard.turkishMeaning}</h2>
+                          {inLevel2SRS && (
+                            <button onClick={(e) => {
+                              e.stopPropagation();
+                              const nextIndex = Math.min((srsEntry?.intervalIndex ?? 0) + 1, SRS_INTERVALS.length - 1);
+                              setLevel2SRS(prev => ({ ...prev, [currentCard.id]: { intervalIndex: nextIndex, nextReviewTime: elapsedPlayTime + SRS_INTERVALS[nextIndex] } }));
+                              handleLevelReviewNext();
+                              setReviewShowImage(false);
+                              setReviewIsFlipped(false);
+                            }} className="w-full py-3 rounded-2xl text-[15px] font-bold transition-all active:scale-[0.98] bg-black text-white hover:bg-gray-900 shadow-md flex items-center justify-center gap-2">
+                              {reviewingCardIdx < reviewingLevelCards.length - 1 ? <><span>Sonraki</span><Check size={18} /></> : <><span>Bitir</span><Check size={18} /></>}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      {/* BACK FACE */}
+                      <div className="absolute inset-0 bg-white rounded-[32px] overflow-hidden shadow-2xl flex flex-col items-center justify-center px-6 py-8"
+                        style={{ backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}
+                      >
+                        {(() => {
+                          const pron = currentCard.word.match(/\(([^)]+)\)/)?.[1];
+                          return pron ? <div className="mb-4 px-4 py-2 bg-blue-50 text-blue-700 text-sm font-bold rounded-xl border border-blue-100">{pron}</div> : null;
+                        })()}
+                        {currentCard.keyword && (
+                          <div className="inline-block px-4 py-1.5 bg-orange-50 text-orange-600 text-xs font-bold uppercase tracking-widest rounded-full mb-5 shadow-sm border border-orange-100">{currentCard.keyword}</div>
+                        )}
+                        {currentCard.story && (
+                          <p className="text-[16px] text-gray-700 font-medium leading-relaxed text-center whitespace-pre-line break-words">{currentCard.story}</p>
                         )}
                       </div>
                     </div>
