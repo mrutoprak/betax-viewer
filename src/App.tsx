@@ -3,19 +3,12 @@ import { collection, getDocs, doc, getDoc, deleteDoc } from "firebase/firestore"
 import { db } from "./firebase";
 import { 
   Play, Loader2, BookOpen, ArrowLeft, RefreshCw, Volume2, 
-  Sparkles, Languages, Search, ChevronRight, X, Clock, Check,
-  PlusCircle, BrainCircuit, ThumbsUp, ThumbsDown, AlertTriangle
+  Sparkles, Languages, Search, ChevronRight, X, Clock, Check
 } from "lucide-react";
 import { generateAudio, detectTargetLang } from "./tts";
 import "./App.css";
 
 declare var YT: any;
-
-interface SrsCard extends Word {
-  intervalIndex: number;
-  nextReviewTime: number;
-  srsStatus: 'pending' | 'active' | 'reviewed';
-}
 
 interface Word {
   id: string;
@@ -29,13 +22,6 @@ interface Word {
   sentenceForm?: string;
   order?: number;
   videoId?: string;
-}
-
-interface SrsQueueItem {
-  segmentIdx: number;
-  sentence: string;
-  translation: string;
-  cards: Word[];
 }
 
 interface TranscriptSegment {
@@ -95,19 +81,6 @@ function getSegmentDuration(idx: number, segments: any[]): number {
   return 4;
 }
 
-// SRS Intervals (Studio ile aynı)
-const SRS_INTERVALS = [
-  5 * 1000,           // 5 seconds
-  25 * 1000,          // 25 seconds
-  2 * 60 * 1000,      // 2 minutes
-  10 * 60 * 1000,     // 10 minutes
-  60 * 60 * 1000,     // 1 hour
-  5 * 60 * 60 * 1000, // 5 hours
-  24 * 60 * 60 * 1000 // 1 day
-];
-
-const SRS_LABELS = ["5s", "25s", "2m", "10m", "1h", "5h", "1d"];
-
 function getWordPlaybackTimes(
   sentence: string, 
   wordForm: string, 
@@ -163,7 +136,7 @@ function getWordPlaybackTimes(
   };
 }
 
-type SideTab = "subtitles" | "levels" | "srs";
+type SideTab = "subtitles" | "levels";
 
 export default function App() {
   const [videos, setVideos] = useState<Video[]>([]);
@@ -189,15 +162,7 @@ export default function App() {
     return val !== 'false';
   });
 
-  // SRS State
-  const [srsQueue, setSrsQueue] = useState<SrsQueueItem[]>([]);
-  const [srsActiveCards, setSrsActiveCards] = useState<SrsCard[]>([]);
-  const [srsRunning, setSrsRunning] = useState(false);
-  const [srsCurrentIdx, setSrsCurrentIdx] = useState(-1);
-  const [srsShowAnswer, setSrsShowAnswer] = useState(false);
-  const [srsWarning, setSrsWarning] = useState(false);
-  const srsPausedRef = useRef(true);
-  const srsPollRef = useRef<number>(0);
+
 
   const playerRef = useRef<any>(null);
   const pollRef = useRef<number>(0);
@@ -412,108 +377,6 @@ export default function App() {
     }
   }, []);
 
-  // === SRS HANDLERS ===
-  const handleAddToSrsQueue = useCallback((segIdx: number) => {
-    const seg = transcriptSegments[segIdx];
-    if (!seg) return;
-    const exists = srsQueue.some(q => q.segmentIdx === segIdx);
-    if (exists) return;
-    const segWords = words.filter(w => 
-      (w.sentenceText?.trim().toLowerCase() || w.word.trim().toLowerCase()) === seg.text.trim().toLowerCase()
-    );
-    if (segWords.length === 0) return;
-    setSrsQueue(prev => [...prev, {
-      segmentIdx: segIdx,
-      sentence: seg.text,
-      translation: seg.translation,
-      cards: segWords,
-    }]);
-    setSideTab('srs');
-  }, [transcriptSegments, words, srsQueue]);
-
-  const handleSrsStart = useCallback(() => {
-    if (srsQueue.length === 0) return;
-    setSrsWarning(true);
-  }, [srsQueue]);
-
-  const handleSrsConfirmStart = useCallback(() => {
-    setSrsWarning(false);
-    // Tüm kuyruktaki kartları active'e ekle
-    const now = Date.now();
-    const cards: SrsCard[] = [];
-    for (const item of srsQueue) {
-      for (const w of item.cards) {
-        cards.push({ ...w, intervalIndex: 0, nextReviewTime: now, srsStatus: 'pending' });
-      }
-    }
-    setSrsActiveCards(cards);
-    setSrsRunning(true);
-    setSrsCurrentIdx(0);
-    setSrsShowAnswer(false);
-    srsPausedRef.current = false;
-  }, [srsQueue]);
-
-  const handleSrsAnswer = useCallback((correct: boolean) => {
-    const card = srsActiveCards[srsCurrentIdx];
-    if (!card) return;
-    const now = Date.now();
-    const updated = [...srsActiveCards];
-    if (correct) {
-      const nextIdx = Math.min(card.intervalIndex + 1, SRS_INTERVALS.length - 1);
-      updated[srsCurrentIdx] = {
-        ...card,
-        intervalIndex: nextIdx,
-        nextReviewTime: now + SRS_INTERVALS[nextIdx],
-        srsStatus: 'reviewed',
-      };
-    } else {
-      updated[srsCurrentIdx] = {
-        ...card,
-        intervalIndex: 0,
-        nextReviewTime: now + SRS_INTERVALS[0],
-        srsStatus: 'pending',
-      };
-    }
-    setSrsActiveCards(updated);
-    setSrsShowAnswer(false);
-    // Sonraki karta geç (due olmayanları atla)
-    const dueCards = updated.filter(c => c.nextReviewTime <= now);
-    if (dueCards.length === 0) {
-      setSrsRunning(false);
-      return;
-    }
-    const nextDueIdx = updated.findIndex(c => c.nextReviewTime <= now);
-    setSrsCurrentIdx(nextDueIdx >= 0 ? nextDueIdx : 0);
-  }, [srsActiveCards, srsCurrentIdx]);
-
-  const handleSrsStop = useCallback(() => {
-    setSrsRunning(false);
-    srsPausedRef.current = true;
-    setSrsCurrentIdx(-1);
-    setSrsShowAnswer(false);
-  }, []);
-
-  const handleRemoveFromQueue = useCallback((segIdx: number) => {
-    setSrsQueue(prev => prev.filter(q => q.segmentIdx !== segIdx));
-  }, []);
-
-  // SRS poll: video oynarken due kartları göster
-  useEffect(() => {
-    if (!srsRunning || srsPausedRef.current || srsActiveCards.length === 0) return;
-    const poll = () => {
-      if (srsPausedRef.current) { srsPollRef.current = requestAnimationFrame(poll); return; }
-      const now = Date.now();
-      const dueIdx = srsActiveCards.findIndex(c => c.nextReviewTime <= now);
-      if (dueIdx >= 0 && dueIdx !== srsCurrentIdx) {
-        setSrsCurrentIdx(dueIdx);
-        setSrsShowAnswer(false);
-      }
-      srsPollRef.current = requestAnimationFrame(poll);
-    };
-    srsPollRef.current = requestAnimationFrame(poll);
-    return () => cancelAnimationFrame(srsPollRef.current);
-  }, [srsRunning, srsActiveCards, srsCurrentIdx]);
-
   // Studio ile aynı mantık: Google Cloud TTS, dil otomatik algılanır
   const playTTS = useCallback(async (wordText: string) => {
     const targetLangName = detectTargetLang(wordText);
@@ -667,7 +530,6 @@ export default function App() {
                 {[
                   { key: 'subtitles' as SideTab, label: 'Altyazılar', icon: <Languages size={14} /> },
                   { key: 'levels' as SideTab, label: 'Seviyeler', icon: <Search size={14} /> },
-                  { key: 'srs' as SideTab, label: 'SRS', icon: <BrainCircuit size={14} /> },
                 ].map(tab => (
                   <button
                     key={tab.key}
@@ -683,11 +545,6 @@ export default function App() {
                     {tab.key === 'levels' && transcriptSegments.length > 0 && (
                       <span className="bg-[#007AFF] text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full ml-1 min-w-[20px] text-center">
                         {transcriptSegments.length}
-                      </span>
-                    )}
-                    {tab.key === 'srs' && (srsQueue.length > 0 || srsActiveCards.length > 0) && (
-                      <span className="bg-green-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full ml-1 min-w-[20px] text-center">
-                        {srsQueue.length + srsActiveCards.length}
                       </span>
                     )}
                     {sideTab === tab.key && (
@@ -850,17 +707,6 @@ export default function App() {
                                         </span>
                                       )}
                                     </div>
-                                    {wordCount > 0 && (
-                                      <button
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          handleAddToSrsQueue(idx);
-                                        }}
-                                        className="text-[10px] font-bold py-1 px-2.5 rounded-lg bg-green-50 text-green-600 border border-green-200 hover:bg-green-100 transition-all active:scale-95"
-                                      >
-                                        + SRS
-                                      </button>
-                                    )}
                                   </div>
                                   
                                   {/* Text & Translation */}
@@ -951,119 +797,6 @@ export default function App() {
                     </div>
                   </div>
                 )}
-
-                {/* === TAB 3: SRS === */}
-                {sideTab === 'srs' && (
-                  <div className="h-full flex flex-col bg-gray-50">
-                    <div className="flex-none px-3 py-2 border-b border-gray-200 bg-gray-100/50 text-left">
-                      <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">SRS TEKRAR</span>
-                    </div>
-                    <div className="flex-grow overflow-y-auto px-3 py-3 space-y-3">
-                      {/* Kuyruktaki cümleler */}
-                      {srsQueue.length > 0 && (
-                        <div>
-                          <div className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-2 px-1">
-                            ⏳ Sıradaki Cümleler ({srsQueue.length})
-                          </div>
-                          <div className="space-y-2">
-                            {srsQueue.map((item) => (
-                              <div key={item.segmentIdx} className="bg-white border border-gray-200 rounded-xl p-3.5 shadow-sm">
-                                <p className="text-[13px] font-medium text-gray-900 text-left">
-                                  {item.translation || item.sentence}
-                                </p>
-                                <p className="text-[11px] text-gray-400 mt-1 text-left">
-                                  📝 {item.cards.length} kart
-                                </p>
-                                <div className="flex gap-2 mt-2">
-                                  <button
-                                    onClick={() => {
-                                      const seg = transcriptSegments[item.segmentIdx];
-                                      if (seg) handleSegmentClick(seg.start);
-                                    }}
-                                    className="flex-1 text-[11px] font-semibold py-1.5 rounded-lg bg-blue-50 text-[#007AFF] border border-blue-100 hover:bg-blue-100 transition-all"
-                                  >
-                                    İncele
-                                  </button>
-                                  <button
-                                    onClick={() => handleRemoveFromQueue(item.segmentIdx)}
-                                    className="text-[11px] font-semibold py-1.5 px-3 rounded-lg bg-red-50 text-red-500 border border-red-100 hover:bg-red-100 transition-all"
-                                  >
-                                    ✕
-                                  </button>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Aktif SRS kartları */}
-                      {srsActiveCards.length > 0 && (
-                        <div>
-                          <div className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-2 px-1">
-                            ⚡ Aktif Kartlar ({srsActiveCards.length})
-                          </div>
-                          <div className="space-y-1.5">
-                            {srsActiveCards.map((card, ci) => {
-                              const isDue = card.nextReviewTime <= Date.now();
-                              return (
-                                <div
-                                  key={card.id + ci}
-                                  onClick={() => { setViewingCard(card); }}
-                                  className={`bg-white border rounded-xl px-3.5 py-3 shadow-sm flex items-center justify-between transition-all ${
-                                    isDue ? 'border-blue-300 bg-blue-50/50' : 'border-gray-200 opacity-60'
-                                  }`}
-                                >
-                                  <div className="flex flex-col min-w-0 text-left">
-                                    <span className="text-[14px] font-bold text-gray-900">
-                                      {card.turkishMeaning}
-                                    </span>
-                                    <span className="text-[10px] text-gray-400 mt-0.5">
-                                      {SRS_LABELS[card.intervalIndex] || '?'}
-                                    </span>
-                                  </div>
-                                  {isDue && (
-                                    <span className="text-[10px] font-bold text-blue-600 bg-blue-100 px-2 py-0.5 rounded-full">
-                                      Sırası Geldi
-                                    </span>
-                                  )}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Boş durum */}
-                      {srsQueue.length === 0 && srsActiveCards.length === 0 && (
-                        <div className="flex flex-col items-center justify-center py-12 text-gray-400 text-center">
-                          <BrainCircuit size={40} className="text-gray-300 mb-3" />
-                          <p className="text-sm font-medium">Henüz SRS'ye eklenmiş cümle yok</p>
-                          <p className="text-xs text-gray-400 mt-1">Seviyeler tab'ından cümleleri SRS'ye ekleyin</p>
-                        </div>
-                      )}
-
-                      {/* Başlat butonu */}
-                      {srsQueue.length > 0 && !srsRunning && (
-                        <button
-                          onClick={handleSrsStart}
-                          className="w-full py-3 rounded-xl bg-green-500 text-white font-bold text-[14px] shadow-md hover:bg-green-600 active:scale-[0.98] transition-all"
-                        >
-                          ▶ Başlat
-                        </button>
-                      )}
-
-                      {srsRunning && (
-                        <button
-                          onClick={handleSrsStop}
-                          className="w-full py-3 rounded-xl bg-red-500 text-white font-bold text-[14px] shadow-md hover:bg-red-600 active:scale-[0.98] transition-all"
-                        >
-                          ⏹ Durdur
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                )}
               </div>
 
             </div>
@@ -1071,46 +804,6 @@ export default function App() {
           </div>
 
         </div>
-      )}
-
-      {/* SRS Başlat Uyarısı */}
-      {srsWarning && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-sm w-full text-center">
-            <AlertTriangle size={40} className="text-amber-500 mx-auto mb-3" />
-            <h3 className="text-[17px] font-bold text-gray-900 mb-2">SRS Başlıyor</h3>
-            <p className="text-[13px] text-gray-500 mb-6 leading-relaxed">
-              Videoyu başlattığınızda SRS otomatik olarak başlayacak.
-              Cümlelerin kartları sırayla gösterilecek.
-              Hazır olduğunuzda videoyu oynatın.
-            </p>
-            <div className="flex gap-3">
-              <button
-                onClick={() => setSrsWarning(false)}
-                className="flex-1 py-2.5 rounded-xl bg-gray-100 text-gray-700 font-semibold text-[13px] hover:bg-gray-200 transition-all"
-              >
-                İptal
-              </button>
-              <button
-                onClick={handleSrsConfirmStart}
-                className="flex-1 py-2.5 rounded-xl bg-green-500 text-white font-semibold text-[13px] hover:bg-green-600 transition-all"
-              >
-                Hazırım
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* SRS Review Overlay */}
-      {srsRunning && srsCurrentIdx >= 0 && srsActiveCards[srsCurrentIdx] && (
-        <SrsReviewCard
-          card={srsActiveCards[srsCurrentIdx]}
-          showAnswer={srsShowAnswer}
-          onFlip={() => setSrsShowAnswer(true)}
-          onAnswer={handleSrsAnswer}
-          onPlayTTS={playTTS}
-        />
       )}
 
       {/* 3. PREMIUM 3D FLIPPING FLASHCARD MODAL — Studio matched exact UX */}
@@ -1256,141 +949,6 @@ function ViewingCardModal({ card, onClose, onPlayPronunciation }: ViewingCardMod
 
         </div>
       </div>
-    </div>
-  );
-}
-
-/* === SRS Review Card Overlay === */
-interface SrsReviewCardProps {
-  card: Word;
-  showAnswer: boolean;
-  onFlip: () => void;
-  onAnswer: (correct: boolean) => void;
-  onPlayTTS: (word: string) => void;
-}
-
-function SrsReviewCard({ card, showAnswer, onFlip, onAnswer, onPlayTTS }: SrsReviewCardProps) {
-  const [isFlipped, setIsFlipped] = useState(false);
-  const [isPlaying, setIsPlaying] = useState(false);
-
-  const handlePlayAudio = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setIsPlaying(true);
-    onPlayTTS(card.word);
-    setTimeout(() => setIsPlaying(false), 1500);
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex flex-col items-center justify-center p-6 bg-black/70 backdrop-blur-sm">
-      {/* Question label */}
-      <div className="mb-4 text-white/70 text-[12px] font-medium tracking-wider uppercase">
-        Bu kelimenin anlamı nedir?
-      </div>
-
-      {/* Flashcard */}
-      <div className="relative w-full max-w-[320px] aspect-[3/4] max-h-[70vh]" style={{ perspective: '1000px' }}>
-        <div
-          className="relative w-full h-full cursor-pointer"
-          style={{
-            transformStyle: 'preserve-3d',
-            transition: 'transform 0.55s ease-in-out',
-            transform: isFlipped ? 'rotateY(180deg)' : 'rotateY(0deg)',
-            willChange: 'transform',
-          }}
-          onClick={() => { if (!isFlipped) { setIsFlipped(true); onFlip(); } }}
-        >
-          {/* FRONT: Türkçe anlam (soru yüzü) */}
-          <div
-            className="absolute inset-0 bg-white rounded-[32px] overflow-hidden shadow-2xl flex flex-col items-center justify-center p-6"
-            style={{ backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden' }}
-          >
-            <div className="w-14 h-14 rounded-full bg-blue-50 flex items-center justify-center mb-4">
-              <BrainCircuit size={28} className="text-[#007AFF]" />
-            </div>
-            <h2 className="text-[22px] font-bold text-gray-900 text-center leading-snug">
-              {card.turkishMeaning}
-            </h2>
-            <p className="text-[12px] text-gray-400 mt-4 text-center">
-              Aklına gelen kelimeyi düşün, sonra tıkla.
-            </p>
-          </div>
-
-          {/* BACK: Flashcard cevap */}
-          <div
-            className="absolute inset-0 bg-white rounded-[32px] overflow-hidden shadow-2xl flex flex-col"
-            style={{
-              backfaceVisibility: 'hidden',
-              WebkitBackfaceVisibility: 'hidden',
-              transform: 'rotateY(180deg)',
-            }}
-          >
-            {/* Image area */}
-            <div className="relative h-[65%] w-full bg-gray-100 flex-shrink-0">
-              {card.imageUrl ? (
-                <img src={card.imageUrl} alt="" className="w-full h-full object-cover" />
-              ) : (
-                <div className="w-full h-full flex flex-col items-center justify-center opacity-40">
-                  <Sparkles size={36} className="text-gray-400 mb-2" />
-                  <p className="text-xs text-gray-400 italic">No image</p>
-                </div>
-              )}
-              <button
-                onClick={handlePlayAudio}
-                className={`absolute top-3 right-3 w-10 h-10 rounded-full flex items-center justify-center shadow-lg ${
-                  isPlaying ? 'bg-blue-500 text-white' : 'bg-white/80 text-gray-700 hover:bg-white'
-                }`}
-              >
-                <Volume2 size={18} className={isPlaying ? 'animate-pulse' : ''} />
-              </button>
-            </div>
-
-            {/* Card info */}
-            <div className="h-[35%] flex flex-col items-center justify-center px-4 bg-white">
-              <div className="flex items-center gap-2 mb-1">
-                <span className="text-[18px] font-bold text-[#007AFF]">
-                  {card.word.replace(/\s*\(.*?\)/g, '')}
-                </span>
-                {(() => {
-                  const pron = card.word.match(/\(([^)]+)\)/)?.[1];
-                  return pron ? <span className="text-[12px] text-gray-400">{pron}</span> : null;
-                })()}
-              </div>
-              {card.keyword && (
-                <div className="px-3 py-1 bg-orange-50 text-orange-600 text-[10px] font-bold uppercase tracking-widest rounded-full border border-orange-100">
-                  {card.keyword}
-                </div>
-              )}
-              {card.story && (
-                <p className="text-[12px] text-gray-500 mt-1.5 text-center leading-snug line-clamp-2">
-                  {card.story}
-                </p>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* ✅ / ❌ Buttons */}
-      {isFlipped && (
-        <div className="mt-6 flex gap-6">
-          <button
-            onClick={() => onAnswer(false)}
-            className="w-16 h-16 rounded-full bg-red-500 text-white shadow-lg flex items-center justify-center hover:bg-red-600 active:scale-90 transition-all"
-          >
-            <ThumbsDown size={28} />
-          </button>
-          <button
-            onClick={() => onAnswer(true)}
-            className="w-16 h-16 rounded-full bg-green-500 text-white shadow-lg flex items-center justify-center hover:bg-green-600 active:scale-90 transition-all"
-          >
-            <ThumbsUp size={28} />
-          </button>
-        </div>
-      )}
-
-      <p className="text-white/50 text-[11px] mt-4 text-center">
-        {isFlipped ? 'Doğru bildiysen ✅, bilemediysen ❌' : 'Cevabı görmek için tıkla'}
-      </p>
     </div>
   );
 }
