@@ -10,19 +10,6 @@ import "./App.css";
 
 declare var YT: any;
 
-// Helper: Auto-detect language for speech synthesis based on text content
-function detectSpeechLang(text: string): string {
-  if (/[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]/.test(text)) return 'ar';     // Arabic
-  if (/[\uAC00-\uD7AF]/.test(text)) return 'ko';                                // Korean
-  if (/[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]/.test(text)) return 'ja';       // Japanese
-  if (/[\u0400-\u04FF]/.test(text)) return 'ru';                                // Russian
-  if (/[\u4E00-\u9FFF]/.test(text)) return 'zh';                                // Chinese
-  if (/[\u0E00-\u0E7F]/.test(text)) return 'th';                                // Thai
-  if (/[\u0600-\u06FF]/.test(text) && /[\u0590-\u05FF]/.test(text)) return 'he';// Hebrew
-  if (/[\u1E00-\u1EFF]/.test(text)) return 'vi';                                // Vietnamese
-  return 'en'; // fallback
-}
-
 interface Word {
   id: string;
   word: string;
@@ -175,28 +162,7 @@ export default function App() {
     return val !== 'false';
   });
 
-  // Voice selector
-  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
-  const [selectedVoiceURI, setSelectedVoiceURI] = useState<string>(() => {
-    return localStorage.getItem('betax-viewer-voice-uri') || '';
-  });
 
-  // Load available voices
-  useEffect(() => {
-    if (typeof window === 'undefined' || !window.speechSynthesis) return;
-    const load = () => {
-      const v = window.speechSynthesis.getVoices();
-      if (v.length > 0) setVoices(v);
-    };
-    load();
-    window.speechSynthesis.addEventListener('voiceschanged', load);
-    return () => window.speechSynthesis.removeEventListener('voiceschanged', load);
-  }, []);
-
-  const handleVoiceChange = useCallback((uri: string) => {
-    setSelectedVoiceURI(uri);
-    localStorage.setItem('betax-viewer-voice-uri', uri);
-  }, []);
 
   const playerRef = useRef<any>(null);
   const pollRef = useRef<number>(0);
@@ -415,34 +381,14 @@ export default function App() {
     // Temizlik: parantez içi okunuşları ve noktalama işaretlerini kaldır
     const cleanWord = wordText.replace(/\s*\(.*?\)\s*/g, "").replace(/[.,!?;:'"()\-_—…\[\]{}«»]/g, '').trim();
     
-    // Seçili voice varsa browser speechSynthesis ile oynat (eski yöntem)
-    if (selectedVoiceURI) {
-      window.speechSynthesis.cancel();
-      const match = voices.find(v => v.voiceURI === selectedVoiceURI);
-      if (match) {
-        const u = new SpeechSynthesisUtterance(cleanWord);
-        u.voice = match;
-        u.rate = 0.85;
-        window.speechSynthesis.speak(u);
-        return;
-      }
-    }
-
-    // Varsayılan: Google Cloud TTS API ile yüksek kaliteli ses
+    // Google Cloud TTS API ile yüksek kaliteli ses (dil otomatik algılanır)
     const targetLangName = detectTargetLang(cleanWord);
     const audioDataUrl = await generateAudio(cleanWord, targetLangName);
     if (audioDataUrl) {
       const audio = new Audio(audioDataUrl);
       await audio.play();
-    } else {
-      // API başarısız olursa browser speechSynthesis'e düş
-      window.speechSynthesis.cancel();
-      const u = new SpeechSynthesisUtterance(cleanWord);
-      u.rate = 0.85;
-      u.lang = detectSpeechLang(cleanWord);
-      window.speechSynthesis.speak(u);
     }
-  }, [selectedVoiceURI, voices]);
+  }, []);
 
   if (loading) {
     return (
@@ -523,20 +469,7 @@ export default function App() {
             <h2 className="flex-1 text-[14px] font-bold text-gray-800 truncate text-left">
               {selectedVideo.name || selectedVideo.title}
             </h2>
-            {/* Voice Selector */}
-            <select
-              value={selectedVoiceURI}
-              onChange={e => handleVoiceChange(e.target.value)}
-              className="text-[11px] bg-gray-50 border border-gray-200 rounded-lg px-2 py-1 text-gray-600 cursor-pointer hover:border-gray-300 outline-none max-w-[140px]"
-              title="Ses seçimi"
-            >
-              <option value="">🔊 Otomatik</option>
-              {voices.map(v => (
-                <option key={v.voiceURI} value={v.voiceURI}>
-                  {v.name} ({v.lang})
-                </option>
-              ))}
-            </select>
+
           </div>
 
           {/* Main Workspace split */}
