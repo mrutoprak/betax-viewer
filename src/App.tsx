@@ -733,6 +733,15 @@ export default function App() {
                         transcriptSegments.map((seg, idx) => {
                           const isActive = idx === currentSegmentIdx;
                           const segWords = words.filter(w => (w.sentenceText?.trim().toLowerCase() || w.word.trim().toLowerCase()) === seg.text.trim().toLowerCase());
+                          // Cümle içindeki kelime sırasına göre sırala
+                          const segWordList = seg.text.split(/\s+/).map(w => w.replace(/[.,!?;:'"()\-_—…\[\]{}«»]/g, '').toLowerCase().trim()).filter(w => w.length > 0);
+                          const segWordsSorted = [...segWords].sort((a, b) => {
+                            const wordA = (a.sentenceForm || a.word).replace(/\s*\([^)]+\)/g, '').replace(/\s*\[[^\]]+\]/g, '').replace(/[.,!?;:'"()\-_—…\[\]{}«»]/g, '').toLowerCase().trim();
+                            const wordB = (b.sentenceForm || b.word).replace(/\s*\([^)]+\)/g, '').replace(/\s*\[[^\]]+\]/g, '').replace(/[.,!?;:'"()\-_—…\[\]{}«»]/g, '').toLowerCase().trim();
+                            const idxA = segWordList.findIndex(w => w === wordA || w.includes(wordA) || wordA.includes(w));
+                            const idxB = segWordList.findIndex(w => w === wordB || w.includes(wordB) || wordB.includes(w));
+                            return (idxA === -1 ? 999 : idxA) - (idxB === -1 ? 999 : idxB);
+                          });
                           const wordCount = segWords.length;
 
                           return (
@@ -793,7 +802,7 @@ export default function App() {
                                         Oluşturulan Kartlar ({wordCount})
                                       </div>
                                       <div className="space-y-2">
-                                        {segWords.map((card) => {
+                                        {segWordsSorted.map((card) => {
                                           const segmentDuration = getSegmentDuration(idx, transcriptSegments);
                                           const wordForm = card.sentenceForm || card.word.replace(/\s*\(.*?\)/g, '');
                                           const { start: wordTimestamp, stopAt } = getWordPlaybackTimes(seg.text, wordForm, seg.start, segmentDuration);
