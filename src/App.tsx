@@ -180,6 +180,7 @@ export default function App() {
   const [dueCheckTrigger, setDueCheckTrigger] = useState(0);
   const [reviewShowImage, setReviewShowImage] = useState(false);
   const [reviewIsFlipped, setReviewIsFlipped] = useState(false);
+  const [reviewIsPlaying, setReviewIsPlaying] = useState(false);
 
 
 
@@ -1134,6 +1135,15 @@ export default function App() {
                     >
                       {/* FRONT FACE */}
                       <div className="absolute inset-0 bg-white rounded-[32px] overflow-hidden shadow-2xl flex flex-col" style={{ backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden' }}>
+                        {/* Ses butonu - her durumda göster */}
+                        <button onClick={(e) => {
+                          e.stopPropagation();
+                          setReviewIsPlaying(true);
+                          playTTS(currentCard.word);
+                          setTimeout(() => setReviewIsPlaying(false), 1500);
+                        }} className={`absolute top-3 right-3 w-10 h-10 rounded-full flex items-center justify-center shadow-lg transition-all duration-200 active:scale-90 z-10 ${reviewIsPlaying ? 'bg-blue-500 text-white' : 'bg-white/80 backdrop-blur-sm text-gray-700 hover:bg-white'}`} title="Play pronunciation">
+                          <Volume2 size={18} className={reviewIsPlaying ? 'animate-pulse' : ''} />
+                        </button>
                         {!reviewShowImage ? (
                           <>
                             <div className="flex-1 flex flex-col items-center justify-center px-6 bg-gradient-to-b from-gray-50 to-white">
