@@ -545,10 +545,7 @@ export default function App() {
       {screen === "splash" && (
         <div className="flex-1 flex flex-col bg-[#F2F2F7]">
           <div className="text-center py-12 px-6 pt-[calc(3rem+env(safe-area-inset-top))]">
-            <div className="flex items-center justify-center gap-2.5 text-[#007AFF] mb-1.5">
-              <div className="w-11 h-11 bg-[#007AFF] rounded-xl flex items-center justify-center text-white text-2xl font-extrabold shadow-md">
-                ع
-              </div>
+            <div className="flex items-center justify-center text-[#007AFF] mb-1.5">
               <h1 className="text-2xl font-bold text-black">Betax Viewer</h1>
             </div>
             <p className="text-gray-400 text-sm">Bir video seçerek kelime öğrenmeye başla</p>
