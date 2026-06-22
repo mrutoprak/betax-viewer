@@ -669,7 +669,7 @@ export default function App() {
                 {[
                   { key: 'subtitles' as SideTab, label: 'Altyazılar', icon: <Languages size={14} /> },
                   { key: 'levels' as SideTab, label: 'Seviyeler', icon: <Search size={14} /> },
-                  { key: 'levels2' as SideTab, label: 'Seviyeler 2', icon: <Search size={14} /> }
+                  { key: 'levels2' as SideTab, label: 'Active', icon: <Search size={14} /> }
                 ].map(tab => (
                   <button
                     key={tab.key}
@@ -973,7 +973,7 @@ export default function App() {
                   </div>
                 )}
 
-                {/* === TAB 3: SEVİYELER 2 === */}
+                {/* === TAB 3: ACTIVE === */}
                 {sideTab === 'levels2' && (
                   <div className="h-full flex flex-col">
                     <div className="flex-none px-3 py-2 border-b border-gray-200 bg-gray-100/50 flex justify-between items-center">
