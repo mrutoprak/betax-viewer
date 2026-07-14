@@ -213,7 +213,7 @@ function getWordPlaybackTimes(
   };
 }
 
-type SideTab = "subtitles" | "levels" | "levels2" | "parts";
+type SideTab = "subtitles" | "levels" | "levels2";
 
 export default function App() {
   const [videos, setVideos] = useState<Video[]>([]);
@@ -253,7 +253,6 @@ export default function App() {
   const [level2SRS, setLevel2SRS] = useState<Record<string, { intervalIndex: number; nextReviewTime: number }>>({});
   
   const [expandedLevel2Segments, setExpandedLevel2Segments] = useState<Set<number>>(new Set());
-  const [expandedParts, setExpandedParts] = useState<Set<string>>(new Set());
   const [reviewingLevelSegment, setReviewingLevelSegment] = useState<number | null>(null);
   const [reviewingCardIdx, setReviewingCardIdx] = useState(0);
   const [showReviewOverlay, setShowReviewOverlay] = useState(false);
@@ -788,8 +787,7 @@ export default function App() {
                 {[
                   { key: 'subtitles' as SideTab, label: 'Altyazılar', icon: <Languages size={14} /> },
                   { key: 'levels' as SideTab, label: 'Seviyeler', icon: <Search size={14} /> },
-                  { key: 'levels2' as SideTab, label: 'Active', icon: <Search size={14} /> },
-                  { key: 'parts' as SideTab, label: 'Part', icon: <Layers size={14} /> }
+                  { key: 'levels2' as SideTab, label: 'Active', icon: <Search size={14} /> }
                 ].map(tab => (
                   <button
                     key={tab.key}
@@ -1042,116 +1040,7 @@ export default function App() {
                   </div>
                 )}
 
-                {/* === TAB 3: PART === */}
-                {sideTab === 'parts' && (
-                  <div className="h-full flex flex-col">
-                    <div className="flex-none px-3 py-2 border-b border-gray-200 bg-gray-100/50 flex justify-between items-center">
-                      <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">PARTS ({parts.length})</span>
-                    </div>
-                    <div className="flex-grow overflow-y-auto scroll-smooth px-3 py-3 space-y-3">
-                      {parts.length === 0 ? (
-                        <div className="flex flex-col items-center justify-center h-full text-gray-400">
-                          <Layers size={40} className="text-gray-300 mb-3" />
-                          <p className="text-sm font-medium">Henüz part oluşturulmamış</p>
-                          <p className="text-xs text-gray-400 mt-1">Studio'da Seviyeler → Yayınla → Part ile oluştur</p>
-                        </div>
-                      ) : (
-                        (() => {
-                          const expandedParts = new Set<string>();
-                          return parts.map(part => {
-                            const isExpanded = expandedParts.has(part.id);
-                            const segIndices: number[] = [];
-                            part.sentenceTexts.forEach(st => {
-                              transcriptSegments.forEach((seg, idx) => {
-                                if (seg.text.toLowerCase().trim() === st.toLowerCase().trim()) {
-                                  segIndices.push(idx);
-                                }
-                              });
-                            });
-                            segIndices.sort();
-                            return (
-                              <div key={part.id} className="w-full rounded-xl bg-white border-2 border-indigo-200 shadow-sm overflow-hidden">
-                                <div
-                                  onClick={() => setExpandedParts(prev => {
-                                    const next = new Set(prev);
-                                    if (next.has(part.id)) next.delete(part.id);
-                                    else next.add(part.id);
-                                    return next;
-                                  })}
-                                  className="bg-indigo-50 px-4 py-3 border-b border-indigo-200 flex items-center gap-3 cursor-pointer hover:bg-indigo-100/50 transition-colors"
-                                >
-                                  <Layers size={16} className="text-indigo-600 shrink-0" />
-                                  <div className="flex-1 min-w-0">
-                                    <span className="text-[14px] font-bold text-indigo-800">{part.name}</span>
-                                    <span className="text-[11px] text-indigo-400 ml-2">{segIndices.length} cümle</span>
-                                  </div>
-                                  <ChevronRight size={16} className={`text-indigo-400 transition-transform duration-200 ${isExpanded ? 'rotate-90' : ''}`} />
-                                </div>
-                                {isExpanded && (
-                                  <div className="p-2 space-y-1">
-                                    {segIndices.map(si => {
-                                      const seg = transcriptSegments[si];
-                                      if (!seg) return null;
-                                      const isActive = si === currentSegmentIdx;
-                                      const segWords = words.filter(w => (w.sentenceText?.trim().toLowerCase() || w.word.trim().toLowerCase()) === seg.text.trim().toLowerCase());
-                                      const hasWords = segWords.length > 0;
-                                      const segParts = seg.text.replace(/^>>\s*/, "").split(/(\s+)/);
-                                      return (
-                                        <div
-                                          key={si}
-                                          data-seg-idx={si}
-                                          onClick={() => handleSegmentClick(seg.start)}
-                                          className={`w-full p-2.5 rounded-lg transition-all duration-200 cursor-pointer border ${
-                                            isActive 
-                                              ? 'bg-blue-50/70 border-blue-200 scale-[1.01]' 
-                                              : 'border-transparent hover:bg-indigo-50/50'
-                                          }`}
-                                        >
-                                          <div className="flex items-start gap-2.5">
-                                            <span className={`text-[11px] font-mono mt-0.5 shrink-0 ${isActive ? 'text-[#007AFF] font-bold' : 'text-gray-400'}`}>
-                                              {formatTime(seg.start)}
-                                            </span>
-                                            <div className="flex-1 min-w-0 text-left">
-                                              <div className={`text-[13px] leading-relaxed ${isActive ? 'text-gray-900 font-semibold' : 'text-gray-700 font-medium'}`}>
-                                                {hasWords ? (
-                                                  segParts.map((part, pi) => {
-                                                    if (/^\s+$/.test(part)) return <span key={pi}>{part}</span>;
-                                                    const clean = part.replace(/[.,!?;:'"()\-_—…\[\]{}«»]/g, '').trim().toLowerCase();
-                                                    if (!clean) return <span key={pi} className="text-gray-400">{part}</span>;
-                                                    const matchedWord = segWords.find(w => {
-                                                      const tc = w.word.replace(/\s*\(.*?\)\s*/g, '').toLowerCase();
-                                                      const fc = w.sentenceForm?.toLowerCase();
-                                                      return tc.includes(clean) || clean.includes(tc) || (fc && (fc.includes(clean) || clean.includes(fc)));
-                                                    });
-                                                    if (!matchedWord) return <span key={pi} className="text-gray-400">{part}</span>;
-                                                    return (
-                                                      <button
-                                                        key={pi}
-                                                        onClick={(e) => { e.stopPropagation(); setViewingCard(matchedWord); }}
-                                                        className="text-[#007AFF] font-bold underline underline-offset-2 hover:text-[#0056cc] transition-colors"
-                                                      >{part}</button>
-                                                    );
-                                                  })
-                                                ) : cleanTextOnTheFly(seg.text)}
-                                              </div>
-                                              {seg.translation && <p className="text-[12px] text-gray-400 mt-0.5 leading-relaxed">{cleanTextOnTheFly(seg.translation)}</p>}
-                                            </div>
-                                          </div>
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          });
-                        })()
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                {/* === TAB 4: ACTIVE === */}
+                {/* === TAB 3: ACTIVE === */}
                 {sideTab === 'levels2' && (
                   <div className="h-full flex flex-col">
                     <div className="flex-none px-3 py-2 border-b border-gray-200 bg-gray-100/50 flex justify-between items-center">
