@@ -3,7 +3,7 @@ import { collection, getDocs, doc, getDoc, deleteDoc } from "firebase/firestore"
 import { db } from "./firebase";
 import { 
   Play, Loader2, BookOpen, ArrowLeft, RefreshCw, Volume2, 
-  Sparkles, Languages, Search, ChevronRight, X, Clock, Check
+  Sparkles, Languages, Search, ChevronRight, X, Clock, Check, Layers
 } from "lucide-react";
 import { generateAudio, detectTargetLang } from "./tts";
 import "./App.css";
@@ -143,6 +143,15 @@ export default function App() {
   const [selectedVideo, setSelectedVideo] = useState<Video | null>(null);
   const [words, setWords] = useState<Word[]>([]);
   const [transcriptSegments, setTranscriptSegments] = useState<TranscriptSegment[]>([]);
+  
+  // Part state
+  interface Part {
+    id: string;
+    name: string;
+    sentenceTexts: string[];
+  }
+  const [parts, setParts] = useState<Part[]>([]);
+  const [showPartView, setShowPartView] = useState(false);
   const [screen, setScreen] = useState<"splash" | "player">("splash");
   const [loading, setLoading] = useState(true);
   const [loadingWords, setLoadingWords] = useState(false);
@@ -383,6 +392,20 @@ export default function App() {
       }
 
       setTranscriptSegments(fetchedSegments);
+      
+      // Load parts from video document
+      try {
+        const videoDoc = await getDoc(doc(db, "videos", video.id));
+        if (videoDoc.exists() && videoDoc.data().parts) {
+          setParts(videoDoc.data().parts as Part[]);
+        } else {
+          setParts([]);
+        }
+      } catch {
+        setParts([]);
+      }
+      setShowPartView(false);
+      
       setScreen("player");
 
     } catch (e) {
@@ -514,6 +537,65 @@ export default function App() {
       await audio.play();
     }
   }, []);
+
+  // Tek bir cümleyi render et (part dışındaki cümleler için)
+  const renderSingleSentence = useCallback((idx: number) => {
+    const seg = transcriptSegments[idx];
+    if (!seg) return null;
+    const isActive = idx === currentSegmentIdx;
+    const segWords = words.filter(w => (w.sentenceText?.trim().toLowerCase() || w.word.trim().toLowerCase()) === seg.text.trim().toLowerCase());
+    const hasWords = segWords.length > 0;
+    const parts = seg.text.replace(/^>>\s*/, "").split(/(\s+)/);
+    return (
+      <div
+        key={idx}
+        data-seg-idx={idx}
+        onClick={() => handleSegmentClick(seg.start)}
+        className={`w-full p-2.5 rounded-lg transition-all duration-200 cursor-pointer border ${
+          isActive 
+            ? 'bg-blue-50/70 border-blue-200 scale-[1.01]' 
+            : 'border-transparent hover:bg-gray-50'
+        }`}
+      >
+        <div className="flex items-start gap-2.5">
+          <span className={`text-[11px] font-mono mt-0.5 shrink-0 ${isActive ? 'text-[#007AFF] font-bold' : 'text-gray-400'}`}>
+            {formatTime(seg.start)}
+          </span>
+          <div className="flex-1 min-w-0 text-left">
+            <div className={`text-[13px] leading-relaxed ${isActive ? 'text-gray-900 font-semibold' : 'text-gray-700 font-medium'}`}>
+              {hasWords ? (
+                parts.map((part, pi) => {
+                  if (/^\s+$/.test(part)) return <span key={pi}>{part}</span>;
+                  const clean = part.replace(/[.,!?;:'"()\-_—\[\]{}«»]/g, '').trim().toLowerCase();
+                  if (!clean) return <span key={pi} className="text-gray-400">{part}</span>;
+                  const matchedWord = segWords.find(w => {
+                    const tc = w.word.replace(/\s*\(.*?\)\s*/g, '').toLowerCase();
+                    const fc = w.sentenceForm?.toLowerCase();
+                    return tc.includes(clean) || clean.includes(tc) || (fc && (fc.includes(clean) || clean.includes(fc)));
+                  });
+                  if (!matchedWord) return <span key={pi} className="text-gray-400">{part}</span>;
+                  return (
+                    <button
+                      key={pi}
+                      onClick={(e) => { e.stopPropagation(); setViewingCard(matchedWord); }}
+                      className="text-[#007AFF] font-bold underline underline-offset-2 hover:text-[#0056cc] transition-colors"
+                    >{part}</button>
+                  );
+                })
+              ) : (
+                cleanTextOnTheFly(seg.text)
+              )}
+            </div>
+            {seg.translation && (
+              <p className="text-[12px] text-gray-400 mt-0.5 leading-relaxed">
+                {cleanTextOnTheFly(seg.translation)}
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }, [transcriptSegments, words, currentSegmentIdx, handleSegmentClick]);
 
   if (loading) {
     return (
@@ -664,6 +746,22 @@ export default function App() {
                 {/* === TAB 1: ALTYAZILAR === */}
                 {sideTab === 'subtitles' && (
                   <div className="h-full flex flex-col">
+                    {/* Part toggle */}
+                    {parts.length > 0 && (
+                      <div className="flex-none px-3 py-1.5 border-b border-gray-100 bg-gray-50">
+                        <button
+                          onClick={() => setShowPartView(!showPartView)}
+                          className={`text-[11px] font-semibold px-3 py-1.5 rounded-md transition-all flex items-center gap-1.5 ${
+                            showPartView
+                              ? 'bg-indigo-100 text-indigo-700 border border-indigo-200'
+                              : 'bg-white text-gray-500 border border-gray-200 hover:bg-gray-100'
+                          }`}
+                        >
+                          <Layers size={12} />
+                          {showPartView ? 'Part Görünümü' : 'Part Görünümü (Kapalı)'}
+                        </button>
+                      </div>
+                    )}
                     <div 
                       ref={transcriptRef}
                       className="flex-grow overflow-y-auto scroll-smooth px-3 py-2 space-y-1 bg-white"
@@ -677,74 +775,113 @@ export default function App() {
                         <div className="flex items-center justify-center h-full text-gray-400 text-sm">
                           Henüz altyazı eklenmemiş.
                         </div>
-                      ) : (
-                        transcriptSegments.map((seg, idx) => {
-                          const isActive = idx === currentSegmentIdx;
-                          const segWords = words.filter(w => (w.sentenceText?.trim().toLowerCase() || w.word.trim().toLowerCase()) === seg.text.trim().toLowerCase());
-                          const hasWords = segWords.length > 0;
-                          const parts = seg.text.replace(/^>>\s*/, "").split(/(\s+)/);
-
-                          return (
-                            <div
-                              key={idx}
-                              data-seg-idx={idx}
-                              onClick={() => handleSegmentClick(seg.start)}
-                              className={`w-full p-2.5 rounded-lg transition-all duration-200 cursor-pointer border ${
-                                isActive 
-                                  ? 'bg-blue-50/70 border-blue-200 scale-[1.01]' 
-                                  : 'border-transparent hover:bg-gray-50'
-                              }`}
-                            >
-                              <div className="flex items-start gap-2.5">
-                                <span className={`text-[11px] font-mono mt-0.5 shrink-0 ${
-                                  isActive ? 'text-[#007AFF] font-bold' : 'text-gray-400'
-                                }`}>
-                                  {formatTime(seg.start)}
-                                </span>
-                                <div className="flex-1 min-w-0 text-left">
-                                  <div className={`text-[13px] leading-relaxed ${
-                                    isActive ? 'text-gray-900 font-semibold' : 'text-gray-700 font-medium'
-                                  }`}>
-                                    {hasWords ? (
-                                      parts.map((part, pi) => {
-                                        if (/^\s+$/.test(part)) return <span key={pi}>{part}</span>;
-                                        const clean = part.replace(/[.,!?;:'"()\-_—…\[\]{}«»]/g, '').trim().toLowerCase();
-                                        if (!clean) return <span key={pi} className="text-gray-400">{part}</span>;
-                                        
-                                        const matchedWord = segWords.find(w => {
-                                          const tc = w.word.replace(/\s*\(.*?\)\s*/g, '').toLowerCase();
-                                          const fc = w.sentenceForm?.toLowerCase();
-                                          return tc.includes(clean) || clean.includes(tc) || (fc && (fc.includes(clean) || clean.includes(fc)));
-                                        });
-
-                                        if (!matchedWord) return <span key={pi} className="text-gray-400">{part}</span>;
-                                        return (
-                                          <button
-                                            key={pi}
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              setViewingCard(matchedWord);
-                                            }}
-                                            className="text-[#007AFF] font-bold underline underline-offset-2 hover:text-[#0056cc] transition-colors"
-                                          >
-                                            {part}
-                                          </button>
-                                        );
-                                      })
-                                    ) : (
-                                      cleanTextOnTheFly(seg.text)
-                                    )}
+                      ) : showPartView && parts.length > 0 ? (
+                        // Part görünümü: cümleleri partlarına göre grupla
+                        (() => {
+                          // Her cümle hangi partta olduğunu bul
+                          const segIdxToPart = new Map<number, Part>();
+                          const partSegments = new Map<string, number[]>(); // partId -> segment indices
+                          
+                          parts.forEach(part => {
+                            part.sentenceTexts.forEach(st => {
+                              const stClean = st.toLowerCase().trim();
+                              transcriptSegments.forEach((seg, idx) => {
+                                if (seg.text.toLowerCase().trim() === stClean) {
+                                  segIdxToPart.set(idx, part);
+                                  if (!partSegments.has(part.id)) partSegments.set(part.id, []);
+                                  partSegments.get(part.id)!.push(idx);
+                                }
+                              });
+                            });
+                          });
+                          
+                          const renderedParts = new Set<string>();
+                          const renderedIndices = new Set<number>();
+                          const elements: React.ReactNode[] = [];
+                          
+                          transcriptSegments.forEach((seg, idx) => {
+                            if (renderedIndices.has(idx)) return;
+                            
+                            const part = segIdxToPart.get(idx);
+                            
+                            if (part && !renderedParts.has(part.id)) {
+                              renderedParts.add(part.id);
+                              const segIndices = (partSegments.get(part.id) || []).sort();
+                              segIndices.forEach(i => renderedIndices.add(i));
+                              
+                              elements.push(
+                                <div key={`part-${part.id}`} className="border-2 border-indigo-200 rounded-xl bg-indigo-50/30 overflow-hidden mb-3">
+                                  <div className="bg-indigo-100 px-3 py-1.5 border-b border-indigo-200 flex items-center gap-2">
+                                    <Layers size={12} className="text-indigo-600" />
+                                    <span className="text-[11px] font-bold text-indigo-700">{part.name}</span>
+                                    <span className="text-[10px] text-indigo-400 ml-auto">{segIndices.length} cümle</span>
                                   </div>
-                                  {seg.translation && (
-                                    <p className="text-[12px] text-gray-400 mt-0.5 leading-relaxed">
-                                      {cleanTextOnTheFly(seg.translation)}
-                                    </p>
-                                  )}
+                                  <div className="p-1.5 space-y-0.5">
+                                    {segIndices.map(si => {
+                                      const s = transcriptSegments[si];
+                                      const isActive = si === currentSegmentIdx;
+                                      const segWords = words.filter(w => (w.sentenceText?.trim().toLowerCase() || w.word.trim().toLowerCase()) === s.text.trim().toLowerCase());
+                                      const hasWords = segWords.length > 0;
+                                      const segParts = s.text.replace(/^>>\s*/, "").split(/(\s+)/);
+                                      return (
+                                        <div
+                                          key={si}
+                                          data-seg-idx={si}
+                                          onClick={() => handleSegmentClick(s.start)}
+                                          className={`w-full p-2 rounded-lg transition-all duration-200 cursor-pointer border ${
+                                            isActive 
+                                              ? 'bg-blue-50/70 border-blue-200 scale-[1.01]' 
+                                              : 'border-transparent hover:bg-indigo-50/50'
+                                          }`}
+                                        >
+                                          <div className="flex items-start gap-2">
+                                            <span className={`text-[11px] font-mono mt-0.5 shrink-0 ${isActive ? 'text-[#007AFF] font-bold' : 'text-gray-400'}`}>
+                                              {formatTime(s.start)}
+                                            </span>
+                                            <div className="flex-1 min-w-0 text-left">
+                                              <div className={`text-[13px] leading-relaxed ${isActive ? 'text-gray-900 font-semibold' : 'text-gray-700 font-medium'}`}>
+                                                {hasWords ? (
+                                                  segParts.map((part, pi) => {
+                                                    if (/^\s+$/.test(part)) return <span key={pi}>{part}</span>;
+                                                    const clean = part.replace(/[.,!?;:'"()\-_—…\[\]{}«»]/g, '').trim().toLowerCase();
+                                                    if (!clean) return <span key={pi} className="text-gray-400">{part}</span>;
+                                                    const matchedWord = segWords.find(w => {
+                                                      const tc = w.word.replace(/\s*\(.*?\)\s*/g, '').toLowerCase();
+                                                      const fc = w.sentenceForm?.toLowerCase();
+                                                      return tc.includes(clean) || clean.includes(tc) || (fc && (fc.includes(clean) || clean.includes(fc)));
+                                                    });
+                                                    if (!matchedWord) return <span key={pi} className="text-gray-400">{part}</span>;
+                                                    return (
+                                                      <button
+                                                        key={pi}
+                                                        onClick={(e) => { e.stopPropagation(); setViewingCard(matchedWord); }}
+                                                        className="text-[#007AFF] font-bold underline underline-offset-2 hover:text-[#0056cc] transition-colors"
+                                                      >{part}</button>
+                                                    );
+                                                  })
+                                                ) : cleanTextOnTheFly(s.text)}
+                                              </div>
+                                              {s.translation && <p className="text-[12px] text-gray-400 mt-0.5 leading-relaxed">{cleanTextOnTheFly(s.translation)}</p>}
+                                            </div>
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
                                 </div>
-                              </div>
-                            </div>
-                          );
-                        })
+                              );
+                            } else if (!part && !renderedIndices.has(idx)) {
+                              // Part'a ait olmayan cümleleri normal göster
+                              renderedIndices.add(idx);
+                              elements.push(renderSingleSentence(idx));
+                            }
+                          });
+                          
+                          return elements;
+                        })()
+                      ) : (
+                        transcriptSegments.map((seg, idx) => renderSingleSentence(idx))
+                      )
                       )}
                     </div>
                   </div>
