@@ -170,7 +170,7 @@ export default function App() {
   const [activatedSegments, setActivatedSegments] = useState<Set<number>>(new Set());
   const [pendingActivateSegments, setPendingActivateSegments] = useState<Set<number>>(new Set());
   const [level2SRS, setLevel2SRS] = useState<Record<string, { intervalIndex: number; nextReviewTime: number }>>({});
-  const [elapsedPlayTime, setElapsedPlayTime] = useState(0);
+  
   const [expandedLevel2Segments, setExpandedLevel2Segments] = useState<Set<number>>(new Set());
   const [reviewingLevelSegment, setReviewingLevelSegment] = useState<number | null>(null);
   const [reviewingCardIdx, setReviewingCardIdx] = useState(0);
@@ -191,22 +191,8 @@ export default function App() {
   const wordPlayingSegmentIdxRef = useRef<number>(-1);
   const transcriptRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (playerRef.current && typeof playerRef.current.getPlayerState === 'function') {
-        try {
-          const state = playerRef.current.getPlayerState();
-          if (state === 1) {
-            setElapsedPlayTime(prev => prev + 1000);
-          }
-        } catch {}
-      }
-    }, 1000);
-    return () => clearInterval(interval);
-  }, []);
-
   const formatTimeLeft = (targetTime: number) => {
-    const diff = targetTime - elapsedPlayTime;
+    const diff = targetTime - Date.now();
     if (diff <= 0) return null;
     const totalSeconds = Math.floor(diff / 1000);
     const hours = Math.floor(totalSeconds / 3600);
@@ -237,7 +223,7 @@ export default function App() {
       const next = { ...prev };
       for (const card of segCards) {
         if (!next[card.id]) {
-          next[card.id] = { intervalIndex: 0, nextReviewTime: elapsedPlayTime + SRS_INTERVALS[0] };
+          next[card.id] = { intervalIndex: 0, nextReviewTime: Date.now() + SRS_INTERVALS[0] };
         }
       }
       return next;
@@ -250,7 +236,7 @@ export default function App() {
     });
     
     setDueCheckTrigger(n => n + 1);
-  }, [transcriptSegments, words, elapsedPlayTime, getSegmentCards]);
+  }, [transcriptSegments, words, getSegmentCards]);
 
   const lastDueCheckRef = useRef(0);
   const [pendingActivateMsg, setPendingActivateMsg] = useState<number | null>(null);
@@ -258,7 +244,7 @@ export default function App() {
   useEffect(() => {
     if (screen !== "player" || !selectedVideo) return;
     
-    const dueEntries = (Object.entries(level2SRS) as [string, { intervalIndex: number; nextReviewTime: number }][]).filter(([_, srs]) => elapsedPlayTime >= srs.nextReviewTime);
+    const dueEntries = (Object.entries(level2SRS) as [string, { intervalIndex: number; nextReviewTime: number }][]).filter(([_, srs]) => Date.now() >= srs.nextReviewTime);
     if (dueEntries.length === 0) return;
     
     const isPlaying = playerRef.current && typeof playerRef.current.getPlayerState === 'function'
@@ -285,7 +271,7 @@ export default function App() {
     setPendingReviewCards(segCards);
     setPendingReviewSegmentIdx(segIdx);
     setShowReviewOverlay(true);
-  }, [elapsedPlayTime, level2SRS, activatedSegments, getSegmentCards, screen, selectedVideo, pendingReviewCards]);
+  }, [level2SRS, activatedSegments, getSegmentCards, screen, selectedVideo, pendingReviewCards]);
 
   const reviewingLevelCards = useMemo(() => {
     if (reviewingLevelSegment === null || !transcriptSegments[reviewingLevelSegment]) return [];
@@ -338,7 +324,7 @@ export default function App() {
     setActivatedSegments(new Set());
     setPendingActivateSegments(new Set());
     setLevel2SRS({});
-    setElapsedPlayTime(0);
+    
     setExpandedLevel2Segments(new Set());
     setReviewingLevelSegment(null);
     setShowReviewOverlay(false);
@@ -617,29 +603,7 @@ export default function App() {
                 <div className="relative w-full overflow-hidden bg-black rounded-2xl shadow-lg border border-gray-200" style={{ aspectRatio: '16/9' }}>
                   <div id="youtube-player" className="absolute inset-0 w-full h-full"></div>
 
-                  {/* Subtitle Toggles */}
-                  <div className="absolute top-3 right-3 z-20 flex items-center gap-1.5 bg-black/50 hover:bg-black/75 px-2 py-1 rounded-lg transition-all duration-200 backdrop-blur-sm border border-white/10 select-none">
-                    <button
-                      onClick={() => setShowOriginalSub(prev => !prev)}
-                      className={`text-[10px] md:text-[11px] font-bold px-2.5 py-0.5 rounded transition-all active:scale-95 ${
-                        showOriginalSub 
-                          ? 'bg-[#007AFF] text-white shadow-sm' 
-                          : 'bg-white/10 text-white/60 hover:text-white hover:bg-white/20'
-                      }`}
-                    >
-                      Orijinal
-                    </button>
-                    <button
-                      onClick={() => setShowTranslationSub(prev => !prev)}
-                      className={`text-[10px] md:text-[11px] font-bold px-2.5 py-0.5 rounded transition-all active:scale-95 ${
-                        showTranslationSub 
-                          ? 'bg-[#007AFF] text-white shadow-sm' 
-                          : 'bg-white/10 text-white/60 hover:text-white hover:bg-white/20'
-                      }`}
-                    >
-                      Türkçe
-                    </button>
-                  </div>
+
 
                   {/* Dual Subtitles Overlay */}
                   {currentSegmentIdx !== -1 && transcriptSegments[currentSegmentIdx] && (showOriginalSub || showTranslationSub) && (
@@ -1013,7 +977,7 @@ export default function App() {
                           });
                           const hasReadyReview = sentenceCards.some(c => {
                             const srs = level2SRS[c.id];
-                            return srs && elapsedPlayTime >= srs.nextReviewTime;
+                            return srs && Date.now() >= srs.nextReviewTime;
                           });
                           const isBlurred = hasReadyReview && !isExpanded;
                           return (
@@ -1172,7 +1136,7 @@ export default function App() {
                             <button onClick={(e) => {
                               e.stopPropagation();
                               const nextIndex = Math.min((srsEntry?.intervalIndex ?? 0) + 1, SRS_INTERVALS.length - 1);
-                              setLevel2SRS(prev => ({ ...prev, [currentCard.id]: { intervalIndex: nextIndex, nextReviewTime: elapsedPlayTime + SRS_INTERVALS[nextIndex] } }));
+                              setLevel2SRS(prev => ({ ...prev, [currentCard.id]: { intervalIndex: nextIndex, nextReviewTime: Date.now() + SRS_INTERVALS[nextIndex] } }));
                               handleLevelReviewNext();
                               setReviewShowImage(false);
                               setReviewIsFlipped(false);
