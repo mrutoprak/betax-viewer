@@ -3,7 +3,7 @@ import { collection, getDocs, doc, getDoc, deleteDoc } from "firebase/firestore"
 import { db } from "./firebase";
 import { 
   Play, Loader2, BookOpen, ArrowLeft, RefreshCw, Volume2, 
-  Sparkles, Languages, Search, ChevronRight, X, Clock, Check
+  Sparkles, Languages, Search, ChevronRight, X, Clock, Check, Layers
 } from "lucide-react";
 import { generateAudio, detectTargetLang } from "./tts";
 import "./App.css";
@@ -31,11 +31,21 @@ interface TranscriptSegment {
   translation: string;
 }
 
+interface Part {
+  id: string;
+  name: string;
+  videoId?: string;
+  level: number;
+  segmentIndices: number[];
+  createdAt?: any;
+}
+
 interface Video {
   id: string;
   name: string;
   title?: string;
   videoUrl?: string;
+  hasParts?: boolean;
   createdAt?: any;
 }
 
@@ -136,12 +146,14 @@ function getWordPlaybackTimes(
   };
 }
 
-type SideTab = "subtitles" | "levels" | "levels2";
+type SideTab = "subtitles" | "levels" | "levels2" | "parts";
 
 export default function App() {
   const [videos, setVideos] = useState<Video[]>([]);
   const [selectedVideo, setSelectedVideo] = useState<Video | null>(null);
   const [words, setWords] = useState<Word[]>([]);
+  const [parts, setParts] = useState<Part[]>([]);
+  const [expandedPartIds, setExpandedPartIds] = useState<Set<string>>(new Set());
   const [transcriptSegments, setTranscriptSegments] = useState<TranscriptSegment[]>([]);
   const [screen, setScreen] = useState<"splash" | "player">("splash");
   const [loading, setLoading] = useState(true);
@@ -351,6 +363,15 @@ export default function App() {
         .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
       
       setWords(allWords);
+
+      // Load parts from Firebase
+      try {
+        const partsSnap = await getDocs(collection(db, "parts"));
+        const allParts = partsSnap.docs
+          .map((d) => ({ id: d.id, ...d.data() } as Part))
+          .filter((p) => p.videoId === youtubeId || p.videoId === video.id);
+        setParts(allParts);
+      } catch {}
 
       // Load Transcript from Firebase (transcripts collection or old video path)
       let fetchedSegments: TranscriptSegment[] = [];
@@ -633,7 +654,8 @@ export default function App() {
                 {[
                   { key: 'subtitles' as SideTab, label: 'Altyazılar', icon: <Languages size={14} /> },
                   { key: 'levels' as SideTab, label: 'Seviyeler', icon: <Search size={14} /> },
-                  { key: 'levels2' as SideTab, label: 'Active', icon: <Search size={14} /> }
+                  { key: 'levels2' as SideTab, label: 'Active', icon: <Search size={14} /> },
+                  { key: 'parts' as SideTab, label: 'Part', icon: <Layers size={14} /> }
                 ].map(tab => (
                   <button
                     key={tab.key}
@@ -1039,6 +1061,134 @@ export default function App() {
                             </div>
                           );
                         })
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* === TAB 4: PART === */}
+                {sideTab === 'parts' && (
+                  <div className="h-full flex flex-col">
+                    <div className="flex-none px-3 py-2 border-b border-gray-200 bg-gray-100/50">
+                      <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">
+                        PART'LAR ({parts.length})
+                      </span>
+                    </div>
+                    <div className="flex-grow overflow-y-auto px-3 py-3 space-y-3">
+                      {parts.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center h-full text-gray-400 pb-16">
+                          <Layers size={40} className="text-gray-300 mb-3" />
+                          <p className="text-sm font-medium text-gray-500">Henüz part yayınlanmamış</p>
+                          <p className="text-xs text-gray-400 mt-1">Studioda part oluşturup yayınla</p>
+                        </div>
+                      ) : (
+                        parts
+                          .sort((a, b) => (a.level ?? 0) - (b.level ?? 0))
+                          .map(part => {
+                            const hue = ((part.level * 60) % 360);
+                            const borderColor = `hsl(${hue}, 60%, 75%)`;
+                            const bgColor = `hsl(${hue}, 50%, 95%)`;
+                            const headerBg = `hsl(${hue}, 45%, 90%)`;
+                            const isExpanded = expandedPartIds.has(part.id);
+                            return (
+                              <div
+                                key={part.id}
+                                className="rounded-xl border-2 overflow-hidden shadow-sm transition-all"
+                                style={{ borderColor, backgroundColor: bgColor }}
+                              >
+                                <div
+                                  className="px-4 py-3 flex items-center justify-between cursor-pointer"
+                                  style={{ backgroundColor: headerBg }}
+                                  onClick={() => setExpandedPartIds(prev => {
+                                    const next = new Set(prev);
+                                    if (next.has(part.id)) next.delete(part.id);
+                                    else next.add(part.id);
+                                    return next;
+                                  })}
+                                >
+                                  <div className="flex items-center gap-2.5">
+                                    <span className="w-6 h-6 rounded-full flex items-center justify-center text-white text-[11px] font-bold"
+                                      style={{ backgroundColor: `hsl(${hue}, 55%, 50%)` }}
+                                    >
+                                      {part.level}
+                                    </span>
+                                    <span className="text-[14px] font-bold text-gray-800">{part.name}</span>
+                                    <span className="text-[10px] text-gray-500 bg-white/60 px-2 py-0.5 rounded-full">
+                                      {part.segmentIndices.length} cümle
+                                    </span>
+                                  </div>
+                                  <ChevronRight
+                                    size={16}
+                                    className={`text-gray-400 transition-transform duration-200 shrink-0 ${
+                                      isExpanded ? 'rotate-90' : ''
+                                    }`}
+                                  />
+                                </div>
+
+                                {isExpanded && (
+                                  <div className="px-3 py-2 space-y-2">
+                                    {part.segmentIndices.sort((a, b) => a - b).map(idx => {
+                                      const seg = transcriptSegments[idx];
+                                      const sentenceWords = words.filter(w => {
+                                        if (!w.sentenceText) return false;
+                                        const cleanSeg = seg ? seg.text.replace(/^>>\s*/, '').toLowerCase().trim() : '';
+                                        return w.sentenceText.toLowerCase().trim() === cleanSeg;
+                                      });
+                                      return (
+                                        <div key={idx} className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                                          <div className="p-3">
+                                            <div className="flex items-start gap-3">
+                                              <div className="text-[16px] font-extrabold text-gray-400 leading-none shrink-0 w-6 text-center pt-0.5">
+                                                {idx + 1}
+                                              </div>
+                                              <div className="flex-1 min-w-0">
+                                                <div className="flex items-center gap-2 mb-1">
+                                                  <span className="text-[10px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">{sentenceWords.length} kart</span>
+                                                </div>
+                                                <p className="text-[13px] font-medium text-gray-900 leading-relaxed">
+                                                  {seg ? seg.text.replace(/^>>\s*/, '') : `Segment ${idx + 1}`}
+                                                </p>
+                                                {seg?.translation && (
+                                                  <p className="text-[12px] text-gray-500 mt-1">
+                                                    {seg.translation}
+                                                  </p>
+                                                )}
+                                              </div>
+                                            </div>
+                                          </div>
+                                          {sentenceWords.length > 0 && (
+                                            <div className="border-t border-gray-100 bg-gray-50/70 px-3 py-2 space-y-1.5">
+                                              {sentenceWords.map(word => (
+                                                <div
+                                                  key={word.id}
+                                                  onClick={() => setViewingCard(word)}
+                                                  className="flex items-center justify-between bg-white rounded-lg px-3 py-2 border border-gray-200 hover:border-gray-300 transition-all cursor-pointer active:scale-[0.99]"
+                                                >
+                                                  <div className="flex-1 min-w-0">
+                                                    <div className="flex items-center gap-1.5">
+                                                      <span className="text-[13px] font-bold text-[#007AFF]">
+                                                        {word.word?.replace(/\s*\(.*?\)/g, '') || ''}
+                                                      </span>
+                                                      {(() => {
+                                                        const pron = word.word?.match(/\(([^)]+)\)/)?.[1];
+                                                        return pron ? <span className="text-[10px] text-gray-400 font-medium">{pron}</span> : null;
+                                                      })()}
+                                                    </div>
+                                                    <p className="text-[12px] text-gray-500 mt-0.5">{word.turkishMeaning}</p>
+                                                  </div>
+                                                  <ChevronRight size={14} className="text-gray-300 shrink-0" />
+                                                </div>
+                                              ))}
+                                            </div>
+                                          )}
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })
                       )}
                     </div>
                   </div>
