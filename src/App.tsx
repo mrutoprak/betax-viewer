@@ -3,7 +3,7 @@ import { collection, getDocs, doc, getDoc, deleteDoc } from "firebase/firestore"
 import { db } from "./firebase";
 import { 
   Play, Loader2, BookOpen, ArrowLeft, RefreshCw, Volume2, 
-  Sparkles, Languages, Search, ChevronRight, X, Clock, Check, Layers
+  Sparkles, Languages, Search, ChevronRight, X, Clock, Check, Layers, PlayCircle
 } from "lucide-react";
 import { generateAudio, detectTargetLang } from "./tts";
 import "./App.css";
@@ -654,7 +654,7 @@ export default function App() {
                 {[
                   { key: 'subtitles' as SideTab, label: 'Altyazılar', icon: <Languages size={14} /> },
                   { key: 'levels' as SideTab, label: 'Seviyeler', icon: <Search size={14} /> },
-                  { key: 'levels2' as SideTab, label: 'Active', icon: <Search size={14} /> },
+                  { key: 'levels2' as SideTab, label: 'Active', icon: <PlayCircle size={14} /> },
                   { key: 'parts' as SideTab, label: 'Part', icon: <Layers size={14} /> }
                 ].map(tab => (
                   <button
