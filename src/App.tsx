@@ -164,15 +164,6 @@ export default function App() {
   const [currentSegmentIdx, setCurrentSegmentIdx] = useState(-1);
   const [viewingCard, setViewingCard] = useState<Word | null>(null);
 
-  // Subtitle Toggle States
-  const [showOriginalSub, setShowOriginalSub] = useState(() => {
-    const val = localStorage.getItem('betax-show-original-sub');
-    return val !== 'false';
-  });
-  const [showTranslationSub, setShowTranslationSub] = useState(() => {
-    const val = localStorage.getItem('betax-show-translation-sub');
-    return val !== 'false';
-  });
 
   // SRS sabitleri
   const SRS_INTERVALS = [5000, 25000, 120000, 600000, 3600000, 18000000, 86400000];
@@ -626,22 +617,7 @@ export default function App() {
 
 
 
-                  {/* Dual Subtitles Overlay */}
-                  {currentSegmentIdx !== -1 && transcriptSegments[currentSegmentIdx] && (showOriginalSub || showTranslationSub) && (
-                    <div className="absolute bottom-4 left-1/2 -translate-x-1/2 w-[90%] max-w-[800px] flex flex-col items-center justify-center pointer-events-none z-10 gap-1.5 font-sans">
-                      {showOriginalSub && (
-                        <div className="bg-black/75 px-3 py-1.5 rounded-md text-white font-semibold text-center text-[13px] sm:text-[15px] md:text-[18px] leading-normal shadow-md backdrop-blur-[2px] select-none">
-                          {cleanTextOnTheFly(transcriptSegments[currentSegmentIdx].text)}
-                        </div>
-                      )}
-                      
-                      {showTranslationSub && transcriptSegments[currentSegmentIdx].translation && (
-                        <div className="bg-black/75 px-3 py-1.5 rounded-md text-gray-200 font-medium text-center text-[11px] sm:text-[13px] md:text-[15px] leading-normal shadow-md backdrop-blur-[2px] select-none">
-                          {cleanTextOnTheFly(transcriptSegments[currentSegmentIdx].translation)}
-                        </div>
-                      )}
-                    </div>
-                  )}
+
                 </div>
               </div>
             </div>
