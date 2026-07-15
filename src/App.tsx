@@ -546,12 +546,12 @@ export default function App() {
   }
 
   return (
-    <div className="w-full h-screen flex flex-col bg-[#F2F2F7] select-none">
+    <div className="w-full h-full flex flex-col bg-[#F2F2F7] select-none">
       
       {/* 1. SPLASH SCREEN — Match Studio Style exactly */}
       {screen === "splash" && (
         <div className="flex-1 flex flex-col bg-[#F2F2F7]">
-          <div className="text-center py-12 px-6 pt-[calc(3rem+env(safe-area-inset-top))]">
+          <div className="flex-shrink-0 text-center py-12 px-6 pt-[calc(3rem+env(safe-area-inset-top))]">
             <div className="flex items-center justify-center text-[#007AFF] mb-1.5">
               <h1 className="text-2xl font-bold text-black">Betax Viewer</h1>
             </div>
@@ -619,7 +619,7 @@ export default function App() {
           <div className="flex-grow flex flex-col md:flex-row overflow-hidden bg-gray-100">
             
             {/* Left: YouTube Video Area */}
-            <div className="w-full md:w-[55%] h-full flex flex-col items-center justify-center p-2 transition-all duration-300 bg-gray-100">
+            <div className="w-full md:w-[55%] h-auto md:h-full flex-shrink-0 flex flex-col items-center justify-center p-2 transition-all duration-300 bg-gray-100">
               <div className="w-full h-full max-w-full flex items-center justify-center">
                 <div className="relative w-full overflow-hidden bg-black rounded-2xl shadow-lg border border-gray-200" style={{ aspectRatio: '16/9' }}>
                   <div id="youtube-player" className="absolute inset-0 w-full h-full"></div>
@@ -647,7 +647,7 @@ export default function App() {
             </div>
 
             {/* Right: Sidebar */}
-            <div className="w-full md:w-[45%] min-w-[320px] h-full bg-white border-l border-gray-200 flex flex-col overflow-hidden shrink-0">
+            <div className="w-full md:w-[45%] min-w-[320px] flex-1 md:flex-none h-full bg-white border-l border-gray-200 flex flex-col overflow-hidden">
               
               {/* Tabs list */}
               <div className="flex-none flex border-b border-gray-200 bg-gray-50">
